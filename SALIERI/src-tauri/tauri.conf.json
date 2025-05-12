@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "salieri",
+  "productName": "Salieri",
   "version": "0.1.0",
   "identifier": "com.salieri.app",
   "build": {

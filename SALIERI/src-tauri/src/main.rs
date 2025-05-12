@@ -5,6 +5,7 @@ use chrono::Local;
 use serde_json::json;
 use tauri_plugin_store::{Builder as StorePlugin, StoreExt};
 use tauri::{async_runtime, AppHandle, Emitter};  
+use uuid::Uuid;
 
 const THEME_KEY: &str           = "current_theme";
 const DEFAULT_THEME: &str       = "dark";
@@ -41,7 +42,17 @@ async fn get_current_theme(app_handle: tauri::AppHandle) -> Result<String, Strin
     Ok(theme)
 }
 
+// tasks
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct Task {
+    id: String,
+    title: String,
+    created_at: String,
+    status: String, // doing, done, todo
+}
+
 // ───────────────────── palette parser ─────────────────────
+
 
 #[tauri::command]
 fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Result<String, String> {
@@ -71,7 +82,7 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
                         tauri::async_runtime::block_on(set_theme(app_handle.clone(), new_theme.into()))
                             .map(|_| format!("theme toggled to {new_theme}"))
                     }
-                    Err(e) => Err(format!("couldn’t read theme: {e}")),
+                    Err(e) => Err(format!("couldn't read theme: {e}")),
                 }
             }
 
@@ -80,35 +91,125 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         };
     }
 
-    Err(format!("unknown command: {command}"))
-}
+    if command.starts_with("/todo ") {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Need tasks".to_string());
+        }
+        let title = parts[1..].join(" "); 
+        let new_task = Task {
+            id: uuid::Uuid::new_v4().to_string(), // generates unique id for each Task
+            title, // same as title: title
+            created_at: Local::now().to_rfc3339(),
+            status: "todo".into(),
+        };
+
+        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+        let mut tasks: Vec<Task> = store
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+        tasks.push(new_task.clone());
+
+        store.set("tasks", json!(tasks));
+        store.save().map_err(|e| e.to_string())?;
+
+    return Ok(format!("added task: {}", new_task.title));
+    }   
+
+    if command.starts_with("/doing ") {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Need task".to_string());
+        }
+        let active_task = parts[1..].join(" ");
+        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+        let mut tasks: Vec<Task> = store
+            .get("tasks")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+    
+        for i in 0..tasks.len() {
+            if tasks[i].title == active_task {
+                tasks[i].status = "doing".into();
+                // store.set returns () so we just call it, then save()
+                store.set("tasks", serde_json::to_value(&tasks).unwrap());
+                store.save().map_err(|e| e.to_string())?;
+                return Ok(format!("task active"));
+            }
+        }
+        return Err(format!("Task not found"));
+    }
+    
+    if command.starts_with("/done ") {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Need task".to_string());
+        }
+        let active_task = parts[1..].join(" ");
+        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+        let mut tasks: Vec<Task> = store
+            .get("tasks")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+    
+        for i in 0..tasks.len() {
+            if tasks[i].title == active_task {
+                tasks[i].status = "done".into();
+                store.set("tasks", serde_json::to_value(&tasks).unwrap());
+                store.save().map_err(|e| e.to_string())?;
+                return Ok(format!("task finished"));
+            }
+        }
+        return Err(format!("Task not found"));
+    }
+
+    
+    return Err(format!("unknown command: {command}"));
+
+    }
 
 // ───────────────────── tauri bootstrap ─────────────────────
 
 fn main() {
     tauri::Builder::default()
-      .plugin(StorePlugin::default().build())
-      .setup(|app| {
-        // open (or create) the store
-        let store = app.store(SETTINGS_STORE_FILENAME)?;
-        // read or insert the default
-        let theme_value = store
-          .get(THEME_KEY)
-          .and_then(|v| v.as_str().map(ToString::to_string))
-          .unwrap_or_else(|| {
-            store.set(THEME_KEY, json!(DEFAULT_THEME));
-            let _ = store.save();
-            DEFAULT_THEME.to_string()
-          });
-        // emit that first payload so the front-end sees it on startup
-        app.emit_to("main", "theme_changed", ThemeChangedPayload { theme: theme_value })?;
-        Ok(())
-      })
-      .invoke_handler(tauri::generate_handler![
-        set_theme,
-        get_current_theme,
-        handle_palette_command
-      ])
-      .run(tauri::generate_context!())
-      .expect("error while running tauri application");
-  }
+        .plugin(tauri_plugin_store::Builder::default().build())
+        .setup(|app| {
+            let store = app.store(SETTINGS_STORE_FILENAME)?;
+            
+            // Initialize the store with default theme if it doesn't exist
+            let theme_value = match store.get(THEME_KEY) {
+                Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
+                    println!("Invalid theme value in store, resetting to default");
+                    store.set(THEME_KEY, json!(DEFAULT_THEME));
+                    let _ = store.save();
+                    DEFAULT_THEME.to_string()
+                }),
+                None => {
+                    println!("No theme found in store, initializing with default");
+                    store.set(THEME_KEY, json!(DEFAULT_THEME));
+                    let _ = store.save();
+                    DEFAULT_THEME.to_string()
+                }
+            };
+
+            println!("Initial theme value: {}", theme_value);
+            
+            // Ensure store is saved before emitting
+            store.save()?;
+            
+            // Broadcast initial state
+            app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            set_theme,
+            get_current_theme,
+            handle_palette_command
+        ])
+
+            
+        
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
