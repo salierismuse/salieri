@@ -1,6 +1,7 @@
 // TODO
 // expand /todo functionality to allow for days to be specified 
 // example: "/todo your mom 5-24-2025";
+// checking tasks will need to also check dates
 //
 // consider storing all tasks in a hash map
 // using the id
@@ -178,8 +179,14 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         for i in 0..tasks.len() {
                 if tasks[i].id == old_active
                 {
-                    old_found = true;
-                    old_index = i; 
+                    if tasks[i].title != active_task {
+                        old_found = true;
+                        old_index = i; 
+                    }
+                    else
+                    {
+                        return Err("already active task".to_string());
+                    }
                 }
                 if tasks[i].title == active_task.to_string()
                 {                        
@@ -198,7 +205,6 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
                 return Ok(format!("task active"));
             }
         }
-        return Err(format!("Task not found"));
     
     if command.starts_with("/done ") {
         let parts: Vec<&str> = command.split_whitespace().collect();
@@ -220,12 +226,30 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
                 return Ok(format!("task finished"));
             }
         }
-        return Err(format!("Task not found"));
     }
 
-
-
-    
+    // disable "doing" task without starting new task
+    if command.starts_with("/break ") {
+        let parts: Vec<&str> = command.split_whitespace().collect();
+        if parts.len() < 2 {
+            return Err("Need task".to_string());
+        }
+        let active_task = parts[1..].join(" ");
+        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+        let mut tasks: Vec<Task> = store
+            .get("tasks")
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+            .unwrap_or_default();
+        for i in 0..tasks.len() {
+            if tasks[i].title == active_task && tasks[i].status == "doing" {
+                tasks[i].status = "todo".into();
+                store.set("tasks", serde_json::to_value(&tasks).unwrap());
+                store.save().map_err(|e| e.to_string())?;
+                return Ok(format!("task paused"));
+            }
+        }
+        return Err("Task not active".to_string())
+    }
     return Err(format!("unknown command: {command}"));
 
     }
