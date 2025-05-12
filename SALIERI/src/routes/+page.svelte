@@ -3,6 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { writable } from 'svelte/store';
+  import { tasks, type Task } from '$lib/stores';
 
   export const theme = writable<'light' | 'dark'>('dark');
 
@@ -13,15 +14,16 @@
   /* ───── lifecycle ───── */
   onMount(async () => {
     try {
-      // Get initial theme from backend
       const initialTheme = await invoke<'light' | 'dark'>('get_current_theme');
       theme.set(initialTheme);
-      
-      // Set initial theme class
+
+      // initial tasks loading
+      const today = new Date().toISOString().slice(0, 10);
+      await load_tasks_for_day(today);
+
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);
 
-      // Subscribe for live changes
       unlisten = await listen('theme_changed', ({ payload }) => {
         const newTheme = (payload as { theme: 'light' | 'dark' }).theme;
         theme.set(newTheme);
@@ -37,6 +39,8 @@
 
   /* ───── command palette ───── */
   async function submitCommand() {
+
+    //clean this later, mostly just testing
     if (commandInput.trim() === '') return;
     try {
       commandOutput = await invoke('handle_palette_command', {
@@ -47,12 +51,26 @@
     } finally {
       commandInput = '';
     }
+    const today = new Date().toISOString().slice(0, 10);
+    await load_tasks_for_day(today);
+    
   }
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
       event.preventDefault();
       submitCommand();
+    }
+  }
+
+  // function to get tasks
+  async function load_tasks_for_day(day: string) {
+    try {
+      const list = await invoke<Task[]>('get_tasks', {day});
+      tasks.set(list);
+    }
+    catch (e) {
+      console.error('failed loading tasks: ', e);
     }
   }
 
@@ -64,17 +82,39 @@
       root.add($theme);
     }
   }
+
+  
 </script>
 
 <main>
   <h1>salieri</h1>
 
-  <input
-    type="text"
-    bind:value={commandInput}
-    placeholder="~welcome to salieri"
-    on:keydown={handleKeydown}
-  />
+  <div class="tasks">
+    <h2>tasks!</h2>
+
+    {#if $tasks.length > 0}
+    <ul>
+      {#each $tasks as task}
+        <li class={task.status}>
+          {task.title}
+        </li>
+      {/each}
+    </ul>
+    {:else}
+      <p>not a task yet, get to work!</p>
+    {/if}
+  </div>
+
+
+
+  <div class ="commandline">
+    <input
+      type="text"
+      bind:value={commandInput}
+      placeholder="~welcome to salieri"
+      on:keydown={handleKeydown}
+    />
+  </div>
 
   {#if commandOutput}
     <p class="greeting-message">{commandOutput}</p>
@@ -102,6 +142,12 @@ main {
   display: flex;
   flex-direction: column;
   text-align: center;
+}
+
+.tasks {
+  width: 20%;
+  height: 60%;
+  background-color: red;
 }
 
 h1 {

@@ -1,7 +1,12 @@
-// Prevents the extra console window on Windows in release – DO NOT REMOVE!
+// TODO
+// expand /todo functionality to allow for days to be specified 
+// example: "/todo your mom 5-24-2025";
+//
+//
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use chrono::Local;
+use chrono::{Local, NaiveDate};
 use serde_json::json;
 use tauri_plugin_store::{Builder as StorePlugin, StoreExt};
 use tauri::{async_runtime, AppHandle, Emitter};  
@@ -42,18 +47,41 @@ async fn get_current_theme(app_handle: tauri::AppHandle) -> Result<String, Strin
     Ok(theme)
 }
 
+// day will be used when flicking through tasks for various days
+#[tauri::command]
+fn get_tasks(app_handle: tauri::AppHandle, day: String) -> Result<Vec<Task>, String> {
+    let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+    let tempTasks: Vec<Task> = store
+    .get("tasks")
+    .and_then(|v| serde_json::from_value(v.clone()).ok())
+    .unwrap_or_default();
+    let mut tasks: Vec<Task> = Vec::new();
+    for i in 0..tempTasks.len() {
+        if tempTasks[i].created_at.to_string().starts_with(&day) {
+            tasks.push(tempTasks[i].clone())
+        }
+    }
+    Ok(tasks)
+}
+
+// -- structs
+
 // tasks
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct Task {
     id: String,
     title: String,
-    created_at: String,
-    status: String, // doing, done, todo
+    status: String,
+    created_at: NaiveDate,
 }
+
 
 // ───────────────────── palette parser ─────────────────────
 
 
+// note, convert these if statements into unique functions that
+// handle_palette_command will call 
+// we could probably just store these all in a seperate file. 
 #[tauri::command]
 fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Result<String, String> {
     if command == "ping" {
@@ -100,7 +128,7 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         let new_task = Task {
             id: uuid::Uuid::new_v4().to_string(), // generates unique id for each Task
             title, // same as title: title
-            created_at: Local::now().to_rfc3339(),
+            created_at: Local::now().date_naive(),
             status: "todo".into(),
         };
 
@@ -164,6 +192,8 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         return Err(format!("Task not found"));
     }
 
+
+
     
     return Err(format!("unknown command: {command}"));
 
@@ -177,7 +207,6 @@ fn main() {
         .setup(|app| {
             let store = app.store(SETTINGS_STORE_FILENAME)?;
             
-            // Initialize the store with default theme if it doesn't exist
             let theme_value = match store.get(THEME_KEY) {
                 Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
                     println!("Invalid theme value in store, resetting to default");
@@ -195,17 +224,16 @@ fn main() {
 
             println!("Initial theme value: {}", theme_value);
             
-            // Ensure store is saved before emitting
             store.save()?;
             
-            // Broadcast initial state
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             set_theme,
             get_current_theme,
-            handle_palette_command
+            handle_palette_command,
+            get_tasks
         ])
 
             
