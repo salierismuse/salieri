@@ -2,7 +2,10 @@
 // expand /todo functionality to allow for days to be specified 
 // example: "/todo your mom 5-24-2025";
 //
-//
+// consider storing all tasks in a hash map
+// using the id
+// for an immediate look up
+// instead of this nonsense for loop every single time
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -11,10 +14,16 @@ use serde_json::json;
 use tauri_plugin_store::{Builder as StorePlugin, StoreExt};
 use tauri::{async_runtime, AppHandle, Emitter};  
 use uuid::Uuid;
+use once_cell::sync::Lazy;
+use std::sync::Mutex;
 
 const THEME_KEY: &str           = "current_theme";
 const DEFAULT_THEME: &str       = "dark";
 const SETTINGS_STORE_FILENAME: &str = "settings.json";
+
+// keep track of "doing" task
+// should only be doing one task at once for flow
+static ACTIVE_TASK_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
 
 #[derive(Clone, serde::Serialize)]
 struct ThemeChangedPayload {
@@ -146,6 +155,9 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
     }   
 
     if command.starts_with("/doing ") {
+        let mut bool_done = false;
+        let mut old_found = false;
+        let mut old_index = 0;
         let parts: Vec<&str> = command.split_whitespace().collect();
         if parts.len() < 2 {
             return Err("Need task".to_string());
@@ -156,18 +168,37 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
             .get("tasks")
             .and_then(|v| serde_json::from_value(v.clone()).ok())
             .unwrap_or_default();
-    
+
+            let old_active = {
+                let guard = ACTIVE_TASK_ID.lock().unwrap();
+                guard.clone()
+            };
+
+        
         for i in 0..tasks.len() {
-            if tasks[i].title == active_task {
-                tasks[i].status = "doing".into();
-                // store.set returns () so we just call it, then save()
+                if tasks[i].id == old_active
+                {
+                    old_found = true;
+                    old_index = i; 
+                }
+                if tasks[i].title == active_task.to_string()
+                {                        
+                    tasks[i].status = "doing".to_string();
+                    let mut guard = ACTIVE_TASK_ID.lock().unwrap();                            
+                    *guard = tasks[i].id.clone();
+                    bool_done = true;
+                }
+            }
+                if bool_done == true {
+                    if old_found == true {
+                        tasks[old_index].status="todo".to_string();
+                    }
                 store.set("tasks", serde_json::to_value(&tasks).unwrap());
                 store.save().map_err(|e| e.to_string())?;
                 return Ok(format!("task active"));
             }
         }
         return Err(format!("Task not found"));
-    }
     
     if command.starts_with("/done ") {
         let parts: Vec<&str> = command.split_whitespace().collect();
@@ -207,6 +238,9 @@ fn main() {
         .setup(|app| {
             let store = app.store(SETTINGS_STORE_FILENAME)?;
             
+
+
+
             let theme_value = match store.get(THEME_KEY) {
                 Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
                     println!("Invalid theme value in store, resetting to default");

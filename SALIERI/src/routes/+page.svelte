@@ -134,6 +134,10 @@
   color: var(--fg);
 }
 
+.doing {
+  color: green;
+}
+
 main {
   height: 100%;
   width: 100%;
