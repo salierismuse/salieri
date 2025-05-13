@@ -18,7 +18,7 @@
       theme.set(initialTheme);
 
       // initial tasks loading
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date().toLocaleDateString('en-CA');
       await load_tasks_for_day(today);
 
       document.documentElement.classList.remove('light', 'dark');
@@ -51,7 +51,7 @@
     } finally {
       commandInput = '';
     }
-    const today = new Date().toISOString().slice(0, 10);
+    const today = new Date().toLocaleDateString('en-CA');
     await load_tasks_for_day(today);
     
   }
@@ -88,7 +88,17 @@
 
 <main>
   <h1>salieri</h1>
-
+  <div class="topbar"> 
+    <p>
+      {#if $tasks.length > 0}
+        {#each $tasks as task}
+          {#if task.status == "doing"}
+            {task.title}
+          {/if}
+        {/each}
+      {/if}
+    </p>
+  </div>
   <div class="tasks">
     <h2>tasks!</h2>
 
@@ -132,6 +142,10 @@
   width: 100%;
   background: var(--bg);
   color: var(--fg);
+}
+
+.topbar {
+  color: purple;
 }
 
 .doing {

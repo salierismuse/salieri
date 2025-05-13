@@ -7,6 +7,21 @@
 // using the id
 // for an immediate look up
 // instead of this nonsense for loop every single time
+//
+// need to move "done" tasks to a seperate tasksdone.json file
+
+/*
+TO DO CONT:
+clean up handle_palette_command by turning all if statements
+into their own functions
+store these in seperate file ultimately
+
+
+brainstorming:
+hashmap<day, pair<id, task>> ? 
+something like that. maybe not id exactly but..
+would be nice to be able to quickly access days, cutting down from O(n) to O(5)/constant [5 tasks a day max assumption]
+*/
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -82,7 +97,7 @@ struct Task {
     id: String,
     title: String,
     status: String,
-    created_at: NaiveDate,
+    created_at: String,
 }
 
 
@@ -138,7 +153,7 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         let new_task = Task {
             id: uuid::Uuid::new_v4().to_string(), // generates unique id for each Task
             title, // same as title: title
-            created_at: Local::now().date_naive(),
+            created_at: Local::now().date_naive().to_string(),
             status: "todo".into(),
         };
 
