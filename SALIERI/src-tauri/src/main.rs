@@ -22,7 +22,6 @@ hashmap<day, pair<id, task>> ?
 something like that. maybe not id exactly but..
 would be nice to be able to quickly access days, cutting down from O(n) to O(5)/constant [5 tasks a day max assumption]
 */
-
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use chrono::{Local, NaiveDate};
@@ -76,16 +75,16 @@ async fn get_current_theme(app_handle: tauri::AppHandle) -> Result<String, Strin
 #[tauri::command]
 fn get_tasks(app_handle: tauri::AppHandle, day: String) -> Result<Vec<Task>, String> {
     let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-    let tempTasks: Vec<Task> = store
+    let temp_tasks: Vec<Task> = store
     .get("tasks")
     .and_then(|v| serde_json::from_value(v.clone()).ok())
     .unwrap_or_default();
-    let mut tasks: Vec<Task> = Vec::new();
-    for i in 0..tempTasks.len() {
-        if tempTasks[i].created_at.to_string().starts_with(&day) {
-            tasks.push(tempTasks[i].clone())
-        }
-    }
+
+    let tasks: Vec<Task> = temp_tasks
+        .into_iter()
+        .filter(|t| t.created_at.starts_with(&day))
+        .collect();
+
     Ok(tasks)
 }
 
@@ -100,200 +99,218 @@ struct Task {
     created_at: String,
 }
 
+// ───────────────────── palette helpers ─────────────────────
 
-// ───────────────────── palette parser ─────────────────────
+fn command_ping() -> Result<String, String> {
+    Ok("pong!".into())
+}
 
+fn command_date() -> Result<String, String> {
+    let now = Local::now();
+    Ok(now.format("%Y-%m-%d %H:%M:%S").to_string())
+}
 
-// note, convert these if statements into unique functions that
-// handle_palette_command will call 
-// we could probably just store these all in a seperate file. 
-#[tauri::command]
-fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Result<String, String> {
-    if command == "ping" {
-        return Ok("pong!".into());
-    }
+fn command_theme(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    match parts.get(1) {
+        Some(&"dark") => async_runtime::block_on(set_theme(app_handle, "dark".into()))
+            .map(|_| "theme set to dark".into()),
 
-    if command == "date" {
-        let now = Local::now();
-        return Ok(now.format("%Y-%m-%d %H:%M:%S").to_string());
-    }
+        Some(&"light") => async_runtime::block_on(set_theme(app_handle, "light".into()))
+            .map(|_| "theme set to light".into()),
 
-    if command.starts_with("/theme") {
-        let parts: Vec<&str> = command.split_whitespace().collect();
-
-        return match parts.get(1) {
-            Some(&"dark") => tauri::async_runtime::block_on(set_theme(app_handle.clone(), "dark".into()))
-                .map(|_| "theme set to dark".into()),
-
-            Some(&"light") => tauri::async_runtime::block_on(set_theme(app_handle.clone(), "light".into()))
-                .map(|_| "theme set to light".into()),
-
-            Some(&"toggle") => {
-                match tauri::async_runtime::block_on(get_current_theme(app_handle.clone())) {
-                    Ok(current) => {
-                        let new_theme = if current == "dark" { "light" } else { "dark" };
-                        tauri::async_runtime::block_on(set_theme(app_handle.clone(), new_theme.into()))
-                            .map(|_| format!("theme toggled to {new_theme}"))
-                    }
-                    Err(e) => Err(format!("couldn't read theme: {e}")),
+        Some(&"toggle") => {
+            match async_runtime::block_on(get_current_theme(app_handle.clone())) {
+                Ok(current) => {
+                    let new_theme = if current == "dark" { "light" } else { "dark" };
+                    async_runtime::block_on(set_theme(app_handle, new_theme.into()))
+                        .map(|_| format!("theme toggled to {new_theme}"))
                 }
+                Err(e) => Err(format!("couldn't read theme: {e}")),
             }
+        }
 
-            Some(arg) => Err(format!("unknown /theme argument '{arg}'. use dark, light, or toggle.")),
-            None       => Err("usage: /theme [dark|light|toggle]".into()),
-        };
+        Some(arg) => Err(format!("unknown /theme argument '{arg}'. use dark, light, or toggle.")),
+        None       => Err("usage: /theme [dark|light|toggle]".into()),
+    }
+}
+
+fn command_todo(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    if parts.len() < 2 {
+        return Err("need task title".into());
     }
 
-    if command.starts_with("/todo ") {
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err("Need tasks".to_string());
-        }
-        let title = parts[1..].join(" "); 
-        let new_task = Task {
-            id: uuid::Uuid::new_v4().to_string(), // generates unique id for each Task
-            title, // same as title: title
-            created_at: Local::now().date_naive().to_string(),
-            status: "todo".into(),
-        };
+    let title = parts[1..].join(" ");
+    let new_task = Task {
+        id: Uuid::new_v4().to_string(),
+        title: title.clone(),
+        created_at: Local::now().date_naive().to_string(),
+        status: "todo".into(),
+    };
 
-        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-        let mut tasks: Vec<Task> = store
+    let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+    let mut tasks: Vec<Task> = store
         .get("tasks")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
-        tasks.push(new_task.clone());
 
-        store.set("tasks", json!(tasks));
+    tasks.push(new_task.clone());
+    store.set("tasks", json!(tasks));
+    store.save().map_err(|e| e.to_string())?;
+
+    Ok(format!("added task: {}", new_task.title))
+}
+
+fn command_doing(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    if parts.len() < 2 {
+        return Err("need task title".into());
+    }
+    let active_task = parts[1..].join(" ");
+
+    let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+    let mut tasks: Vec<Task> = store
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let old_active_id = {
+        let guard = ACTIVE_TASK_ID.lock().unwrap();
+        guard.clone()
+    };
+
+    let mut old_index: Option<usize> = None;
+    let mut activated = false;
+
+    for (i, task) in tasks.iter_mut().enumerate() {
+        if task.id == old_active_id && task.title != active_task {
+            old_index = Some(i);
+        }
+        if task.title == active_task {
+            if task.status == "doing" {
+                return Err("already active task".into());
+            }
+            task.status = "doing".into();
+            let mut guard = ACTIVE_TASK_ID.lock().unwrap();
+            *guard = task.id.clone();
+            activated = true;
+        }
+    }
+
+    if activated {
+        if let Some(idx) = old_index {
+            tasks[idx].status = "todo".into();
+        }
+        store.set("tasks", serde_json::to_value(&tasks).unwrap());
         store.save().map_err(|e| e.to_string())?;
-
-    return Ok(format!("added task: {}", new_task.title));
-    }   
-
-    if command.starts_with("/doing ") {
-        let mut bool_done = false;
-        let mut old_found = false;
-        let mut old_index = 0;
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err("Need task".to_string());
-        }
-        let active_task = parts[1..].join(" ");
-        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-        let mut tasks: Vec<Task> = store
-            .get("tasks")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-
-            let old_active = {
-                let guard = ACTIVE_TASK_ID.lock().unwrap();
-                guard.clone()
-            };
-
-        
-        for i in 0..tasks.len() {
-                if tasks[i].id == old_active
-                {
-                    if tasks[i].title != active_task {
-                        old_found = true;
-                        old_index = i; 
-                    }
-                    else
-                    {
-                        return Err("already active task".to_string());
-                    }
-                }
-                if tasks[i].title == active_task.to_string()
-                {                        
-                    tasks[i].status = "doing".to_string();
-                    let mut guard = ACTIVE_TASK_ID.lock().unwrap();                            
-                    *guard = tasks[i].id.clone();
-                    bool_done = true;
-                }
-            }
-                if bool_done == true {
-                    if old_found == true {
-                        tasks[old_index].status="todo".to_string();
-                    }
-                store.set("tasks", serde_json::to_value(&tasks).unwrap());
-                store.save().map_err(|e| e.to_string())?;
-                return Ok(format!("task active"));
-            }
-        }
-    
-        if command.starts_with("/done ") {
-            let parts: Vec<&str> = command.split_whitespace().collect();
-            if parts.len() < 2 {
-                return Err("need task title".into());
-            }
-            let target_title = parts[1..].join(" ");
-        
-            // open both stores
-            let store_todo  = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-            let store_done  = app_handle.store("donetasks.json").map_err(|e| e.to_string())?;
-        
-            // pull vectors
-            let mut todo_tasks: Vec<Task> = store_todo
-                .get("tasks")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-        
-            let mut done_tasks: Vec<Task> = store_done
-                .get("tasks")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-        
-            // find + remove
-            if let Some(pos) = todo_tasks.iter().position(|t| t.title == target_title) {
-                let mut finished = todo_tasks.remove(pos);   // yank it out of todo list
-                finished.status = "done".into();             // mark done
-                done_tasks.push(finished);                   // push into done list
-        
-                // write both files back
-                store_todo.set("tasks", json!(todo_tasks));
-                store_todo.save().map_err(|e| e.to_string())?;
-        
-                store_done.set("tasks", json!(done_tasks));
-                store_done.save().map_err(|e| e.to_string())?;
-        
-                // clear active task tracker if this was the running one
-                {
-                    let mut guard = ACTIVE_TASK_ID.lock().unwrap();
-                    if *guard == target_title {
-                        guard.clear();
-                    }
-                }
-        
-                return Ok("task moved to done".into());
-            } else {
-                return Err("task not found".into());
-            }
-        }
-    // disable "doing" task without starting new task
-    if command.starts_with("/break ") {
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err("Need task".to_string());
-        }
-        let active_task = parts[1..].join(" ");
-        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-        let mut tasks: Vec<Task> = store
-            .get("tasks")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-        for i in 0..tasks.len() {
-            if tasks[i].title == active_task && tasks[i].status == "doing" {
-                tasks[i].status = "todo".into();
-                store.set("tasks", serde_json::to_value(&tasks).unwrap());
-                store.save().map_err(|e| e.to_string())?;
-                return Ok(format!("task paused"));
-            }
-        }
-        return Err("Task not active".to_string())
+        return Ok("task active".into());
     }
-    return Err(format!("unknown command: {command}"));
+    Err("task not found".into())
+}
 
+fn command_done(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    if parts.len() < 2 {
+        return Err("need task title".into());
     }
+    let target_title = parts[1..].join(" ");
+
+    let store_todo  = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+    let store_done  = app_handle.store("donetasks.json").map_err(|e| e.to_string())?;
+
+    let mut todo_tasks: Vec<Task> = store_todo
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    let mut done_tasks: Vec<Task> = store_done
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    if let Some(pos) = todo_tasks.iter().position(|t| t.title == target_title) {
+        let mut finished = todo_tasks.remove(pos);
+        finished.status = "done".into();
+        done_tasks.push(finished);
+
+        store_todo.set("tasks", json!(todo_tasks));
+        store_todo.save().map_err(|e| e.to_string())?;
+
+        store_done.set("tasks", json!(done_tasks));
+        store_done.save().map_err(|e| e.to_string())?;
+
+        let mut guard = ACTIVE_TASK_ID.lock().unwrap();
+        if *guard == target_title {
+            guard.clear();
+        }
+
+        Ok("task moved to done".into())
+    } else {
+        Err("task not found".into())
+    }
+}
+
+fn command_break(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    if parts.len() < 2 {
+        return Err("need task title".into());
+    }
+    let active_task = parts[1..].join(" ");
+
+    let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+    let mut tasks: Vec<Task> = store
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+
+    for task in tasks.iter_mut() {
+        if task.title == active_task && task.status == "doing" {
+            task.status = "todo".into();
+            store.set("tasks", serde_json::to_value(&tasks).unwrap());
+            store.save().map_err(|e| e.to_string())?;
+            return Ok("task paused".into());
+        }
+    }
+    Err("task not active".into())
+}
+
+// ───────────────────── palette parser ─────────────────────
+
+#[tauri::command]
+fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Result<String, String> {
+    let trimmed = command.trim();
+
+    if trimmed == "ping" {
+        return command_ping();
+    }
+
+    if trimmed == "date" {
+        return command_date();
+    }
+
+    if trimmed.starts_with("/theme") {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        return command_theme(&parts, app_handle);
+    }
+
+    if trimmed.starts_with("/todo ") {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        return command_todo(&parts, app_handle);
+    }
+
+    if trimmed.starts_with("/doing ") {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        return command_doing(&parts, app_handle);
+    }
+
+    if trimmed.starts_with("/done ") {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        return command_done(&parts, app_handle);
+    }
+
+    if trimmed.starts_with("/break ") {
+        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+        return command_break(&parts, app_handle);
+    }
+
+    Err(format!("unknown command: {trimmed}"))
+}
 
 // ───────────────────── tauri bootstrap ─────────────────────
 
@@ -302,29 +319,26 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let store = app.store(SETTINGS_STORE_FILENAME)?;
-            
-
-
 
             let theme_value = match store.get(THEME_KEY) {
                 Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
-                    println!("Invalid theme value in store, resetting to default");
+                    println!("invalid theme value in store, resetting to default");
                     store.set(THEME_KEY, json!(DEFAULT_THEME));
                     let _ = store.save();
                     DEFAULT_THEME.to_string()
                 }),
                 None => {
-                    println!("No theme found in store, initializing with default");
+                    println!("no theme found in store, initializing with default");
                     store.set(THEME_KEY, json!(DEFAULT_THEME));
                     let _ = store.save();
                     DEFAULT_THEME.to_string()
                 }
             };
 
-            println!("Initial theme value: {}", theme_value);
-            
+            println!("initial theme value: {}", theme_value);
+
             store.save()?;
-            
+
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
             Ok(())
         })
@@ -334,9 +348,6 @@ fn main() {
             handle_palette_command,
             get_tasks
         ])
-
-            
-        
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
