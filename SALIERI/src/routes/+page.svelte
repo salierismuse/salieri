@@ -39,22 +39,21 @@
 
   /* ───── command palette ───── */
   async function submitCommand() {
+  if (commandInput.trim() === '') return;
 
-    //clean this later, mostly just testing
-    if (commandInput.trim() === '') return;
-    try {
-      commandOutput = await invoke('handle_palette_command', {
-        command: commandInput
-      });
-    } catch (e) {
-      commandOutput = `error: ${e}`;
-    } finally {
-      commandInput = '';
-    }
-    const today = new Date().toLocaleDateString('en-CA');
-    await load_tasks_for_day(today);
-    
+  const cmd = commandInput.trim();
+  commandInput = '';                 // clear early for snappier ux
+
+  try {
+    commandOutput = await invoke('handle_palette_command', { command: cmd });
+  } catch (e) {
+    commandOutput = `error: ${e}`;
   }
+
+  const today   = new Date().toLocaleDateString('en-CA');
+  const done    = cmd.startsWith('/completed');    // toggle source
+  await load_tasks_for_day(today, done);
+}
 
   function handleKeydown(event: KeyboardEvent) {
     if (event.key === 'Enter') {
@@ -64,15 +63,14 @@
   }
 
   // function to get tasks
-  async function load_tasks_for_day(day: string) {
-    try {
-      const list = await invoke<Task[]>('get_tasks', {day});
-      tasks.set(list);
-    }
-    catch (e) {
-      console.error('failed loading tasks: ', e);
-    }
+  async function load_tasks_for_day(day: string, done = false) {
+  try {
+    const list = await invoke<Task[]>('get_tasks', { day, done });
+    tasks.set(list);
+  } catch (e) {
+    console.error('failed loading tasks:', e);
   }
+}
 
   /* ───── reactively sync <html> classes without wiping others ───── */
   $: {

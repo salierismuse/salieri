@@ -35,6 +35,8 @@ use std::sync::Mutex;
 const THEME_KEY: &str           = "current_theme";
 const DEFAULT_THEME: &str       = "dark";
 const SETTINGS_STORE_FILENAME: &str = "settings.json";
+const TODO_FILE: &str             = "tasks.json";
+const DONE_FILE: &str             = "donetasks.json";
 
 // keep track of "doing" task
 // should only be doing one task at once for flow
@@ -71,21 +73,19 @@ async fn get_current_theme(app_handle: tauri::AppHandle) -> Result<String, Strin
     Ok(theme)
 }
 
+fn fetch_tasks(app: &AppHandle, day: &str, done: bool) -> Result<Vec<Task>, String> {
+    let file = if done { DONE_FILE } else { TODO_FILE };
+    let store = app.store(file).map_err(|e| e.to_string())?;
+    let list: Vec<Task> = store.get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+    Ok(list.into_iter().filter(|t| t.created_at.starts_with(day)).collect())
+}
+
 // day will be used when flicking through tasks for various days
 #[tauri::command]
-fn get_tasks(app_handle: tauri::AppHandle, day: String) -> Result<Vec<Task>, String> {
-    let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-    let temp_tasks: Vec<Task> = store
-    .get("tasks")
-    .and_then(|v| serde_json::from_value(v.clone()).ok())
-    .unwrap_or_default();
-
-    let tasks: Vec<Task> = temp_tasks
-        .into_iter()
-        .filter(|t| t.created_at.starts_with(&day))
-        .collect();
-
-    Ok(tasks)
+fn get_tasks(app: AppHandle, day: String, done: bool) -> Result<Vec<Task>, String> {
+    fetch_tasks(&app, &day, done)
 }
 
 // -- structs
@@ -270,6 +270,10 @@ fn command_break(parts: &[&str], app_handle: AppHandle) -> Result<String, String
     Err("task not active".into())
 }
 
+fn command_completed() -> Result<String, String> {
+    return Ok("success".into());
+    }
+
 // ───────────────────── palette parser ─────────────────────
 
 #[tauri::command]
@@ -307,6 +311,9 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
     if trimmed.starts_with("/break ") {
         let parts: Vec<&str> = trimmed.split_whitespace().collect();
         return command_break(&parts, app_handle);
+    }
+    if trimmed.starts_with("/completed ") {
+        return command_completed();
     }
 
     Err(format!("unknown command: {trimmed}"))
