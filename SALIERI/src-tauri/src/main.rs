@@ -221,28 +221,54 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
             }
         }
     
-    if command.starts_with("/done ") {
-        let parts: Vec<&str> = command.split_whitespace().collect();
-        if parts.len() < 2 {
-            return Err("Need task".to_string());
-        }
-        let active_task = parts[1..].join(" ");
-        let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
-        let mut tasks: Vec<Task> = store
-            .get("tasks")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-            .unwrap_or_default();
-    
-        for i in 0..tasks.len() {
-            if tasks[i].title == active_task {
-                tasks[i].status = "done".into();
-                store.set("tasks", serde_json::to_value(&tasks).unwrap());
-                store.save().map_err(|e| e.to_string())?;
-                return Ok(format!("task finished"));
+        if command.starts_with("/done ") {
+            let parts: Vec<&str> = command.split_whitespace().collect();
+            if parts.len() < 2 {
+                return Err("need task title".into());
+            }
+            let target_title = parts[1..].join(" ");
+        
+            // open both stores
+            let store_todo  = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
+            let store_done  = app_handle.store("donetasks.json").map_err(|e| e.to_string())?;
+        
+            // pull vectors
+            let mut todo_tasks: Vec<Task> = store_todo
+                .get("tasks")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+        
+            let mut done_tasks: Vec<Task> = store_done
+                .get("tasks")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+        
+            // find + remove
+            if let Some(pos) = todo_tasks.iter().position(|t| t.title == target_title) {
+                let mut finished = todo_tasks.remove(pos);   // yank it out of todo list
+                finished.status = "done".into();             // mark done
+                done_tasks.push(finished);                   // push into done list
+        
+                // write both files back
+                store_todo.set("tasks", json!(todo_tasks));
+                store_todo.save().map_err(|e| e.to_string())?;
+        
+                store_done.set("tasks", json!(done_tasks));
+                store_done.save().map_err(|e| e.to_string())?;
+        
+                // clear active task tracker if this was the running one
+                {
+                    let mut guard = ACTIVE_TASK_ID.lock().unwrap();
+                    if *guard == target_title {
+                        guard.clear();
+                    }
+                }
+        
+                return Ok("task moved to done".into());
+            } else {
+                return Err("task not found".into());
             }
         }
-    }
-
     // disable "doing" task without starting new task
     if command.starts_with("/break ") {
         let parts: Vec<&str> = command.split_whitespace().collect();
