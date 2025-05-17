@@ -36,6 +36,7 @@ use std::sync::{Mutex, Arc};
 use std::time::Duration;
 use tokio::time::{interval, Interval};
 
+
 // salieri's muse
 
 const THEME_KEY: &str           = "current_theme";
@@ -134,7 +135,7 @@ impl PomodoroTimer {
         let interval = interval(Duration::from_secs(1));
         *self.interval.lock().unwrap() = Some(interval);
         tokio::spawn(async move {
-        if (oldPaused != true) {
+        if oldPaused != true {
         loop {
 
             let mut __internal_should_sleep_and_continue = false;
@@ -228,6 +229,50 @@ lazy_static! {
 fn init_pomodoro(app_handle: AppHandle) {
     let mut timer = POMODORO.lock().unwrap();
     *timer = Some(PomodoroTimer::new(app_handle));
+}
+
+fn start_task_timer_loop(app_handle: AppHandle) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        loop {
+            ticker.tick().await;
+
+            let active_id = {
+                let guard = ACTIVE_TASK_ID.lock().unwrap();
+                guard.clone()
+            };
+
+            if active_id.is_empty() {
+                continue; // no active task
+            }
+
+            // load task store
+            let store = match app_handle.store("tasks.json") {
+                Ok(s) => s,
+                Err(_) => continue,
+            };
+
+            let mut tasks: Vec<Task> = store
+                .get("tasks")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+
+            let mut changed = false;
+
+            for task in tasks.iter_mut() {
+                if task.id == active_id && task.status == "doing" {
+                    task.time_spent += 1;
+                    changed = true;
+                    break;
+                }
+            }
+
+            if changed {
+                let _ = store.set("tasks", json!(tasks));
+                let _ = store.save();
+            }
+        }
+    });
 }
 
 #[tauri::command]
@@ -327,6 +372,7 @@ struct Task {
     title: String,
     status: String,
     created_at: String,
+    time_spent: u64,
 }
 
 // ───────────────────── palette helpers ─────────────────────
@@ -375,6 +421,7 @@ fn command_todo(parts: &[&str], app_handle: AppHandle) -> Result<String, String>
         title: title.clone(),
         created_at: Local::now().date_naive().to_string(),
         status: "todo".into(),
+        time_spent: 0,
     };
 
     let store = app_handle.store("tasks.json").map_err(|e| e.to_string())?;
@@ -531,13 +578,22 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
 
 // ───────────────────── tauri bootstrap ─────────────────────
 
-
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
+            let app_handle = app.handle().clone();
+
+            // start background task timer loop correctly
+            std::thread::spawn(move || {
+                tauri::async_runtime::spawn(async move {
+                    start_task_timer_loop(app_handle);
+                });
+            });
+
+            // theme setup logic
             let store = app.store(SETTINGS_STORE_FILENAME)?;
-            
+
             let theme_value = match store.get(THEME_KEY) {
                 Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
                     println!("invalid theme value in store, resetting to default");
@@ -559,6 +615,7 @@ fn main() {
 
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
             init_pomodoro(app.handle().clone());
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
