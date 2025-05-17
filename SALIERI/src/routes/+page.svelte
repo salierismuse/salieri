@@ -53,6 +53,9 @@
 
   const today   = new Date().toLocaleDateString('en-CA');
   
+
+  // this whole thing is a mess
+  // clean it up later
   if (cmd.startsWith('/todo'))
   {
     done = false;
