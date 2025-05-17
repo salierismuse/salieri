@@ -10,6 +10,7 @@
   let unlisten: () => void;          // will hold the listener cleanup fn
   let commandInput = '';
   let commandOutput = '';
+  let done = false;
 
   /* ───── lifecycle ───── */
   onMount(async () => {
@@ -51,7 +52,19 @@
   }
 
   const today   = new Date().toLocaleDateString('en-CA');
-  const done    = cmd.startsWith('/completed');    // toggle source
+  
+  if (cmd.startsWith('/todo'))
+  {
+    done = false;
+  }
+  else if ((!cmd.startsWith('/todo')) && done == true)
+  {
+    done = true;
+  }
+  if (cmd.startsWith('/completed'))
+  {
+    done = true;
+  }
   await load_tasks_for_day(today, done);
 }
 

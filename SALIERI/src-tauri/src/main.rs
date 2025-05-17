@@ -278,46 +278,23 @@ fn command_completed() -> Result<String, String> {
 
 #[tauri::command]
 fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Result<String, String> {
-    let trimmed = command.trim();
+    let trimmed_command = command.trim();
+    let parts: Vec<&str> = trimmed_command.split_whitespace().collect();
 
-    if trimmed == "ping" {
-        return command_ping();
+    match parts.get(0) {
+        Some(&"ping") => command_ping(),
+        Some(&"date") => command_date(),
+        Some(&"/theme") => command_theme(&parts, app_handle),
+        Some(&"/todo") => command_todo(&parts, app_handle),
+        Some(&"/doing") => command_doing(&parts, app_handle),
+        Some(&"/done") => command_done(&parts, app_handle),
+        Some(&"/break") => command_break(&parts, app_handle),
+        Some(&"/completed") => command_completed(), // Assuming /completed does not take arguments based on your original code
+        Some(unknown_cmd) => Err(format!("unknown command: {}", unknown_cmd)),
+        None => Err("empty command received".into()), // Handle empty command string
     }
-
-    if trimmed == "date" {
-        return command_date();
-    }
-
-    if trimmed.starts_with("/theme") {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        return command_theme(&parts, app_handle);
-    }
-
-    if trimmed.starts_with("/todo ") {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        return command_todo(&parts, app_handle);
-    }
-
-    if trimmed.starts_with("/doing ") {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        return command_doing(&parts, app_handle);
-    }
-
-    if trimmed.starts_with("/done ") {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        return command_done(&parts, app_handle);
-    }
-
-    if trimmed.starts_with("/break ") {
-        let parts: Vec<&str> = trimmed.split_whitespace().collect();
-        return command_break(&parts, app_handle);
-    }
-    if trimmed.starts_with("/completed ") {
-        return command_completed();
-    }
-
-    Err(format!("unknown command: {trimmed}"))
 }
+
 
 // ───────────────────── tauri bootstrap ─────────────────────
 
