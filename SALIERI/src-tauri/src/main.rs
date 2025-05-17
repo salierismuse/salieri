@@ -22,6 +22,7 @@ hashmap<day, pair<id, task>> ?
 something like that. maybe not id exactly but..
 would be nice to be able to quickly access days, cutting down from O(n) to O(5)/constant [5 tasks a day max assumption]
 */
+
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use chrono::{Local, NaiveDate};
@@ -78,7 +79,7 @@ struct PomodoroTimer {
     long_break_duration: Duration,
     sessions_before_long_break: u32,
     current_session: Arc<Mutex<u32>>,
-    interval: Mutex<Option<Interval>>,
+    interval: Arc<Mutex<Option<tokio::time::Interval>>>,
     app_handle: AppHandle,
 }
 
@@ -93,7 +94,7 @@ impl PomodoroTimer {
             long_break_duration: Duration::from_secs(15 * 5),
             sessions_before_long_break: 4,
             current_session: Arc::new(Mutex::new(1)),
-            interval: Mutex::new(None),
+            interval: Arc::new(Mutex::new(None)),
             app_handle,
         }
     }
@@ -101,12 +102,14 @@ impl PomodoroTimer {
         // start will handle both beginning and resuming,
         // /start and /resume will both lead here
         async fn start(&self) {
+            let mut oldPaused = false;
             let mut state = self.state.lock().unwrap();
             if matches!(*state, TimerState::Running) {
                 return;
             }
             let mut resume_from = None;
             if matches!(*state, TimerState::Paused){
+                oldPaused = true;
                 resume_from = Some(*self.remaining_seconds.lock().unwrap());
             }
             let initial_seconds = match resume_from {
@@ -126,13 +129,30 @@ impl PomodoroTimer {
         let short_break_duration = self.short_break_duration;
         let long_break_duration = self.long_break_duration;
         let work_duration = self.work_duration;
-
-        let mut interval = interval(Duration::from_secs(1));
+        let interval_clone = Arc::clone(&self.interval);
+        
+        let interval = interval(Duration::from_secs(1));
         *self.interval.lock().unwrap() = Some(interval);
-
         tokio::spawn(async move {
+        if (oldPaused != true) {
         loop {
+
+            let mut __internal_should_sleep_and_continue = false;
+           { let current_interval_guard = interval_clone.lock().unwrap();
+            if current_interval_guard.is_none(){
+                    let __internal_state_guard = state_clone.lock().unwrap();
+                    if *__internal_state_guard == TimerState::Paused {
+                        __internal_should_sleep_and_continue = true;
+                    }
+                } }
+            if __internal_should_sleep_and_continue {
+                tokio::time::sleep(Duration::from_millis(1000)).await;
+                continue;
+
+            }
+
              { let mut remaining = remaining_seconds.lock().unwrap();
+            
             if *remaining > 0 {
                 *remaining -= 1;
             } else {
@@ -167,7 +187,7 @@ impl PomodoroTimer {
             );
         }
             tokio::time::sleep(Duration::from_millis(1000)).await;
-        }
+        } }
     });
 }
 
@@ -517,7 +537,7 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let store = app.store(SETTINGS_STORE_FILENAME)?;
-
+            
             let theme_value = match store.get(THEME_KEY) {
                 Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
                     println!("invalid theme value in store, resetting to default");
@@ -538,6 +558,7 @@ fn main() {
             store.save()?;
 
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
+            init_pomodoro(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

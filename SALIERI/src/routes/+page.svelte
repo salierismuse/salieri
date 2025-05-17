@@ -6,14 +6,18 @@
   import { tasks, type Task } from '$lib/stores';
 
   export const theme = writable<'light' | 'dark'>('dark');
+  export const timerState = writable<'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak'>('Idle');
+  export const remainingTime = writable(0);
 
-  let unlisten: () => void;          // will hold the listener cleanup fn
+
+  let unlistenTheme: () => void;
+  let unlistenTimer: () => void;
   let commandInput = '';
   let commandOutput = '';
   let done = false;
 
   /* ───── lifecycle ───── */
-  onMount(async () => {
+ onMount(async () => {
     try {
       const initialTheme = await invoke<'light' | 'dark'>('get_current_theme');
       theme.set(initialTheme);
@@ -25,18 +29,30 @@
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);
 
-      unlisten = await listen('theme_changed', ({ payload }) => {
+      unlistenTheme = await listen('theme_changed', ({ payload }) => {
         const newTheme = (payload as { theme: 'light' | 'dark' }).theme;
         theme.set(newTheme);
         document.documentElement.classList.remove('light', 'dark');
         document.documentElement.classList.add(newTheme);
       });
+
+      unlistenTimer = await listen('timer_updated', ({ payload }) => {
+        const timerPayload = payload as { state: 'idle' | 'running' | 'paused' | 'shortbreak' | 'longbreak'; remaining_time: number };
+        timerState.set(timerPayload.state.charAt(0).toUpperCase() + timerPayload.state.slice(1) as 'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak');
+        remainingTime.set(timerPayload.remaining_time);
+      });
+
     } catch (e) {
-      console.error('Failed to initialize theme:', e);
+      console.error('Failed to initialize:', e);
     }
   });
 
-  onDestroy(() => unlisten?.());     // avoid piling up listeners in dev
+ 
+  onDestroy(() => {
+    unlistenTheme?.();
+    unlistenTimer?.();
+  });
+
 
   /* ───── command palette ───── */
   async function submitCommand() {
@@ -53,6 +69,13 @@
 
   const today   = new Date().toLocaleDateString('en-CA');
   
+      if (cmd === '/start') {
+        await invoke('start_timer');
+      } else if (cmd === '/pause') {
+        await invoke('pause_timer');
+      } else if (cmd === '/stop') {
+        await invoke('stop_timer');
+      }
 
   // this whole thing is a mess
   // clean it up later
@@ -88,6 +111,26 @@
   }
 }
 
+  // async function startTimer() {
+  //   await invoke('start_timer');
+  // }
+
+  // async function pauseTimer() {
+  //   await invoke('pause_timer');
+  // }
+
+  // async function stopTimer() {
+  //   await invoke('stop_timer');
+  // }
+
+
+  function formatTime(totalSeconds: number): string {
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  }
+
+
   /* ───── reactively sync <html> classes without wiping others ───── */
   $: {
     if (document.documentElement) {
@@ -112,6 +155,10 @@
         {/each}
       {/if}
     </p>
+    <div class="pomodoro">
+      <p>{formatTime($remainingTime)}</p>
+      <p>State: {$timerState}</p>
+    </div>
   </div>
   <div class="tasks">
     <h2>tasks!</h2>
