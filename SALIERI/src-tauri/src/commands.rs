@@ -2,7 +2,7 @@ use chrono::Local;
 use tauri::AppHandle;
 
 use crate::theme::{set_theme, get_current_theme};
-use crate::tasks::{command_todo, command_doing, command_done, command_break, command_completed};
+use crate::tasks::{command_todo, command_doing, command_done, command_break, command_completed, command_deleteT};
 use crate::pomodoro::{command_start_pomodoro, command_pause_pomodoro, command_stop_pomodoro, command_resume_pomodoro};
 
 pub fn command_ping() -> Result<String, String> {
@@ -51,6 +51,7 @@ pub fn handle_palette_command(command: String, app_handle: AppHandle) -> Result<
         Some(&"/doing") => command_doing(&parts, app_handle),
         Some(&"/done") => command_done(&parts, app_handle),
         Some(&"/break") => command_break(&parts, app_handle),
+        Some(&"/deleteT") => command_deleteT(&parts, app_handle),
         Some(&"/completed") => command_completed(), 
         Some(&"/start") => command_start_pomodoro(),
         Some(&"/pause") => command_pause_pomodoro(),

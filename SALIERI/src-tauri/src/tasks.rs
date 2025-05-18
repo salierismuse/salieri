@@ -256,6 +256,24 @@ pub fn command_break(parts: &[&str], app_handle: AppHandle) -> Result<String, St
     Err("task not active".into())
 }
 
+pub fn command_deleteT(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+    if parts.len() < 2 {
+        return Err("need task title".into());
+    }
+    let deleted_task = parts[1..].join(" ");
+    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
+    let mut tasks: Vec<Task> = store 
+        .get("tasks")
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default();
+     tasks.retain(|t| t.title != deleted_task);
+    store
+        .set("tasks", serde_json::to_value(&tasks).unwrap());
+    store.save().map_err(|e| e.to_string())?;
+    Err("task not active".into())
+}
+
+
 pub fn command_completed() -> Result<String, String> {
     Ok("success".into())
 }
