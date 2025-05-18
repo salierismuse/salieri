@@ -1,1 +1,2 @@
-SALIERI is a productivity tool. a place to read pdfs, write code, edit files, track your tasks, journal, and keep track of the time all in one. your one stop shop for productivity. 
+salieri is a fullscreen, keyboard-first, local-only productivity environment for developers, students, and researchers who need deep focus and minimal context switching. it integrates code editing, journaling, task tracking, and personal accountability into a cohesive workflow, entirely offline. everything you do in this, stays in this. no external windows, no pop-ups, it's all right here. 
+
