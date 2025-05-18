@@ -3,7 +3,7 @@ use tauri::AppHandle;
 
 use crate::theme::{set_theme, get_current_theme};
 use crate::tasks::{command_todo, command_doing, command_done, command_break, command_completed};
-use crate::pomodoro::{command_start_pomodoro, command_pause_pomodoro, command_stop_pomodoro};
+use crate::pomodoro::{command_start_pomodoro, command_pause_pomodoro, command_stop_pomodoro, command_resume_pomodoro};
 
 pub fn command_ping() -> Result<String, String> {
     Ok("pong!".into())
@@ -54,6 +54,7 @@ pub fn handle_palette_command(command: String, app_handle: AppHandle) -> Result<
         Some(&"/completed") => command_completed(), 
         Some(&"/start") => command_start_pomodoro(),
         Some(&"/pause") => command_pause_pomodoro(),
+        Some(&"/resume") => command_resume_pomodoro(),
         Some(&"/stop") => command_stop_pomodoro(),
         Some(unknown_cmd) => Err(format!("unknown command: {}", unknown_cmd)),
         None => Err("empty command received".into()), 

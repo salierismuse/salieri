@@ -35,3 +35,10 @@ pub fn increment_tasks_done(app: AppHandle) -> Result<String, String> {
     User::save_user(&app, &user)?;
     Ok(format!("tasks done: {}", user.tasks_done))
 }
+
+pub fn increment_pomodoros_done(app: AppHandle) -> Result<String, String> {
+    let mut user = User::load_user(&app)?;
+    user.pomodoro_done += 1;
+    User::save_user(&app, &user)?;
+    Ok(format!("tasks done: {}", user.pomodoro_done))
+}

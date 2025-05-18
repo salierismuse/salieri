@@ -1,13 +1,18 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter};
-use tokio::time::interval;
+
 use lazy_static::lazy_static;
+use once_cell::sync::OnceCell;
+use tauri::{AppHandle, Emitter};
+use tokio::time;
+
+use crate::user::increment_pomodoros_done;
 
 #[derive(Clone, serde::Serialize)]
 pub struct TimerUpdatePayload {
     pub state: String,
     pub remaining_time: u64,
+    pub interval_time: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -20,194 +25,239 @@ pub enum TimerState {
 }
 
 pub struct PomodoroTimer {
-    state: Arc<Mutex<TimerState>>,
-    remaining_seconds: Arc<Mutex<u64>>,
+    // runtime state --------------------------------------------------------
+    state: Arc<Mutex<TimerState>>,                // current timer phase
+    last_active_state: Arc<Mutex<Option<TimerState>>>, // where to resume after pause
+
+    remaining_seconds: Arc<Mutex<u64>>,           // seconds left in the phase
+    current_session: Arc<Mutex<u32>>,             // completed work sessions so far
+
+    // constants ------------------------------------------------------------
     work_duration: Duration,
     short_break_duration: Duration,
     long_break_duration: Duration,
     sessions_before_long_break: u32,
-    current_session: Arc<Mutex<u32>>,
-    interval: Arc<Mutex<Option<tokio::time::Interval>>>,
+    interval_time: u64,                           // tick size in seconds
+
+    // integration ----------------------------------------------------------
     app_handle: AppHandle,
 }
 
 impl PomodoroTimer {
-    fn new(app_handle: AppHandle) -> Self {
-        let initial_work_duration_secs = 25 * 60;
-        PomodoroTimer {
+    pub fn new(app_handle: AppHandle) -> Self {
+        // make the defaults tiny for demo – tweak as needed
+        let work_secs = 5; // seconds
+        let short_break_secs = 5; // seconds
+        let long_break_secs = 15 * 60; // seconds
+        let interval_time = 1; // tick every second
+
+        Self {
             state: Arc::new(Mutex::new(TimerState::Idle)),
-            remaining_seconds: Arc::new(Mutex::new(initial_work_duration_secs)),
-            work_duration: Duration::from_secs(initial_work_duration_secs),
-            short_break_duration: Duration::from_secs(60 * 5),
-            long_break_duration: Duration::from_secs(15 * 5),
-            sessions_before_long_break: 4,
+            last_active_state: Arc::new(Mutex::new(None)),
+
+            remaining_seconds: Arc::new(Mutex::new(work_secs)),
             current_session: Arc::new(Mutex::new(1)),
-            interval: Arc::new(Mutex::new(None)),
+
+            work_duration: Duration::from_secs(work_secs),
+            short_break_duration: Duration::from_secs(short_break_secs),
+            long_break_duration: Duration::from_secs(long_break_secs),
+            sessions_before_long_break: 4,
+            interval_time,
+
             app_handle,
         }
     }
 
-    pub async fn start(&self) {
-        let mut oldPaused = false;
-        let mut state = self.state.lock().unwrap();
-        if matches!(*state, TimerState::Running) {
-            return;
-        }
-        let mut resume_from = None;
-        if matches!(*state, TimerState::Paused){
-            oldPaused = true;
-            resume_from = Some(*self.remaining_seconds.lock().unwrap());
-        }
-        let initial_seconds = match resume_from {
-            Some(secs) => secs,
-            None => self.work_duration.as_secs(),
-        };
-        *state = TimerState::Running;
-        *self.remaining_seconds.lock().unwrap() = initial_seconds;
+    // ───────────────────────── public api ────────────────────────────────
 
-        let app_handle = self.app_handle.clone();
-        let remaining_seconds = Arc::clone(&self.remaining_seconds);
-        let state_clone = Arc::clone(&self.state);
-        let next_session = Arc::clone(&self.current_session);
-        let long_break_interval = self.sessions_before_long_break;
-        let short_break_duration = self.short_break_duration;
-        let long_break_duration = self.long_break_duration;
-        let work_duration = self.work_duration;
-        let interval_clone = Arc::clone(&self.interval);
-        
-        let interval = interval(Duration::from_secs(1));
-        *self.interval.lock().unwrap() = Some(interval);
-        tokio::spawn(async move {
-            if oldPaused != true {
-                loop {
-                    let mut __internal_should_sleep_and_continue = false;
-                    {
-                        let current_interval_guard = interval_clone.lock().unwrap();
-                        if current_interval_guard.is_none(){
-                            let __internal_state_guard = state_clone.lock().unwrap();
-                            if *__internal_state_guard == TimerState::Paused {
-                                __internal_should_sleep_and_continue = true;
-                            }
-                        }
-                    }
-                    if __internal_should_sleep_and_continue {
-                        tokio::time::sleep(Duration::from_millis(1000)).await;
-                        continue;
-                    }
+    pub async fn start(&self) -> Result<(), &'static str> {
+        if *self.state.lock().unwrap() != TimerState::Idle {
+            return Err("timer already started; use resume()");
+        }
+        self.boot_cycle(TimerState::Running, self.work_duration.as_secs())
+            .await;
+        Ok(())
+    }
 
-                    {
-                        let mut remaining = remaining_seconds.lock().unwrap();
-                        if *remaining > 0 {
-                            *remaining -= 1;
-                        } else {
-                            let current_state = *state_clone.lock().unwrap();
-                            let mut session = next_session.lock().unwrap();
-                            match current_state {
-                                TimerState::Running => {
-                                    if *session % long_break_interval == 0 {
-                                        *state_clone.lock().unwrap() = TimerState::LongBreak;
-                                        *remaining = long_break_duration.as_secs();
-                                    } else {
-                                        *state_clone.lock().unwrap() = TimerState::ShortBreak;
-                                        *remaining = short_break_duration.as_secs();
-                                    }
-                                    *session += 1;
-                                }
-                                TimerState::ShortBreak | TimerState::LongBreak => {
-                                    *state_clone.lock().unwrap() = TimerState::Running;
-                                    *remaining = work_duration.as_secs();
-                                }
-                                _ => break,
-                            }
-                        }
-                        let current_state = *state_clone.lock().unwrap();
-                        let _ = app_handle.emit(
-                            "timer_updated",
-                            TimerUpdatePayload {
-                                state: format!("{:?}", current_state).to_lowercase(),
-                                remaining_time: *remaining,
-                            },
-                        );
-                    }
-                    // ← THIS LINE RESTORED
-                    tokio::time::sleep(Duration::from_millis(1000)).await;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-        });
+    pub fn resume(&self) -> Result<(), &'static str> {
+        if *self.state.lock().unwrap() != TimerState::Paused {
+            return Err("timer is not paused");
+        }
+        let prev = self
+            .last_active_state
+            .lock()
+            .unwrap()
+            .take()
+            .unwrap_or(TimerState::Running);
+        let secs_left = *self.remaining_seconds.lock().unwrap();
+        tauri::async_runtime::block_on(self.boot_cycle(prev, secs_left));
+        Ok(())
     }
 
     pub fn pause(&self) {
-        let mut state = self.state.lock().unwrap();
-        if matches!(*state, TimerState::Running) {
-            *state = TimerState::Paused;
-            *self.interval.lock().unwrap() = None; 
+        let mut st = self.state.lock().unwrap();
+        if matches!(*st, TimerState::Running | TimerState::ShortBreak | TimerState::LongBreak) {
+            *self.last_active_state.lock().unwrap() = Some(*st);
+            *st = TimerState::Paused;
         }
     }
 
     pub fn stop(&self) {
-        let mut state = self.state.lock().unwrap();
-        *state = TimerState::Idle; 
-
-        let mut remaining_seconds = self.remaining_seconds.lock().unwrap();
-        *remaining_seconds = 0; 
-
-        let mut current_session = self.current_session.lock().unwrap();
-        *current_session = 1; 
-
-        *self.interval.lock().unwrap() = None; 
-
+        *self.state.lock().unwrap() = TimerState::Idle;
+        *self.remaining_seconds.lock().unwrap() = self.work_duration.as_secs();
+        *self.current_session.lock().unwrap() = 1;
         let _ = self.app_handle.emit(
             "timer_updated",
-            TimerUpdatePayload { state: "idle".into(), remaining_time: 0 },
+            TimerUpdatePayload {
+                state: "idle".into(),
+                remaining_time: self.work_duration.as_secs(),
+                interval_time: 0,
+            },
         );
     }
+
+    // ─────────────────────── internal helpers ────────────────────────────
+
+    async fn boot_cycle(&self, new_state: TimerState, initial_secs: u64) {
+        *self.state.lock().unwrap() = new_state;
+        *self.remaining_seconds.lock().unwrap() = initial_secs;
+
+        static LOOP_STARTED: OnceCell<()> = OnceCell::new();
+        if LOOP_STARTED.set(()).is_ok() {
+            self.spawn_loop();
+        }
+    }
+
+    fn spawn_loop(&self) {
+        // capture everything we need by value so the future is 'static & Send
+        let st = Arc::clone(&self.state);
+        let remain = Arc::clone(&self.remaining_seconds);
+        let session = Arc::clone(&self.current_session);
+        let app = self.app_handle.clone();
+        let sbreak_secs = self.short_break_duration.as_secs();
+        let lbreak_secs = self.long_break_duration.as_secs();
+        let work_secs = self.work_duration.as_secs();
+        let every = self.sessions_before_long_break;
+        let tick = self.interval_time; // capture primitive, no borrow
+
+        // use tauri runtime: no Send requirement, but future is 'static now anyway
+        tauri::async_runtime::spawn(async move {
+            loop {
+                time::sleep(Duration::from_secs(tick)).await;
+
+                // skip ticking while paused
+                if *st.lock().unwrap() == TimerState::Paused {
+                    continue;
+                }
+                if *st.lock().unwrap() != TimerState::Idle {
+                // tick or transition
+                let mut rem = remain.lock().unwrap();
+                if *rem > tick {
+                    *rem -= tick;
+                } else {
+                    let mut s = st.lock().unwrap();
+                    let mut sess = session.lock().unwrap();
+                    match *s {
+                        TimerState::Running => {
+                            if *sess % every == 0 {
+                                *s = TimerState::LongBreak;
+                                *rem = lbreak_secs;
+                            } else {
+                                *s = TimerState::ShortBreak;
+                                *rem = sbreak_secs;
+                            }
+                            *sess += 1;
+                            increment_pomodoros_done(app.clone());
+                        }
+                        TimerState::ShortBreak | TimerState::LongBreak => {
+                            *s = TimerState::Running;
+                            *rem = work_secs;
+                        }
+                        _ => {}
+                    }
+                }
+
+                // broadcast update
+                let _ = app.emit(
+                    "timer_updated",
+                    TimerUpdatePayload {
+                        state: format!("{:?}", *st.lock().unwrap()).to_lowercase(),
+                        remaining_time: *rem,
+                        interval_time: tick,
+                    },
+                );
+            }
+            }
+        });
+    }
 }
+
+// ───────────────────────── module globals ────────────────────────────────
 
 lazy_static! {
     static ref POMODORO: Mutex<Option<PomodoroTimer>> = Mutex::new(None);
 }
 
-pub fn init_pomodoro(app_handle: AppHandle) {
-    let mut timer = POMODORO.lock().unwrap();
-    *timer = Some(PomodoroTimer::new(app_handle));
+pub fn init_pomodoro(app: AppHandle) {
+    let mut guard = POMODORO.lock().unwrap();
+    *guard = Some(PomodoroTimer::new(app));
 }
+
+// ─────────────────────────── tauri commands ──────────────────────────────
 
 #[tauri::command]
 pub async fn start_timer() -> Result<(), String> {
-    let timer_guard = POMODORO.lock().unwrap();
-    if let Some(ref timer) = *timer_guard {
-        timer.start().await;
-        Ok(())
-    } else {
-        Err("Pomodoro timer not initialized".into())
-    }
+    POMODORO
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("pomodoro timer not initialized".to_string())?
+        .start()
+        .await
+        .map_err(|e| e.into())
+}
+
+#[tauri::command]
+pub fn resume_timer() -> Result<(), String> {
+    POMODORO
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("pomodoro timer not initialized".to_string())?
+        .resume()
+        .map_err(|e| e.into())
 }
 
 #[tauri::command]
 pub fn pause_timer() -> Result<(), String> {
-    let timer_guard = POMODORO.lock().unwrap();
-    if let Some(ref timer) = *timer_guard {
-        timer.pause();
-        Ok(())
-    } else {
-        Err("Pomodoro timer not initialized".into())
-    }
+    POMODORO
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("pomodoro timer not initialized".to_string())?
+        .pause();
+    Ok(())
 }
 
 #[tauri::command]
 pub fn stop_timer() -> Result<(), String> {
-    let timer_guard = POMODORO.lock().unwrap();
-    if let Some(ref timer) = *timer_guard {
-        timer.stop();
-        Ok(())
-    } else {
-        Err("Pomodoro timer not initialized".into())
-    }
+    POMODORO
+        .lock()
+        .unwrap()
+        .as_ref()
+        .ok_or("pomodoro timer not initialized".to_string())?
+        .stop();
+    Ok(())
 }
+
+// ───────────── convenience wrappers for invoke() callers ────────────────
 
 pub fn command_start_pomodoro() -> Result<String, String> {
     tauri::async_runtime::block_on(start_timer()).map(|_| "pomodoro started".into())
+}
+
+pub fn command_resume_pomodoro() -> Result<String, String> {
+    resume_timer().map(|_| "pomodoro resumed".into())
 }
 
 pub fn command_pause_pomodoro() -> Result<String, String> {

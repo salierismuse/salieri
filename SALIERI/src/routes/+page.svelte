@@ -7,7 +7,7 @@
 
   export const theme = writable<'light' | 'dark'>('dark');
   export const timerState = writable<'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak'>('Idle');
-  export const remainingTime = writable(0);
+  export let remainingTime = writable(25 * 60);
 
 
   let unlistenTheme: () => void;
@@ -57,6 +57,8 @@
   /* ───── command palette ───── */
   async function submitCommand() {
   if (commandInput.trim() === '') return;
+
+ 
 
   const cmd = commandInput.trim();
   commandInput = '';                 // clear early for snappier ux
