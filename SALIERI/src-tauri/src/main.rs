@@ -7,7 +7,7 @@ mod tasks;
 mod commands;
 
 use crate::theme::{set_theme, get_current_theme, ThemeChangedPayload, THEME_KEY, DEFAULT_THEME, SETTINGS_STORE_FILENAME};
-use crate::tasks::{get_tasks, start_task_timer_loop};
+use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup};
 use crate::pomodoro::init_pomodoro;
 use crate::commands::handle_palette_command;
 
@@ -20,10 +20,11 @@ fn main() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .setup(|app| {
             let app_handle = app.handle().clone();
+            let bg_handle = app.handle().clone();
 
             std::thread::spawn(move || {
                 tauri::async_runtime::spawn(async move {
-                    start_task_timer_loop(app_handle);
+                    start_task_timer_loop(bg_handle);
                 });
             });
 
@@ -47,6 +48,8 @@ fn main() {
             println!("initial theme value: {}", theme_value);
 
             store.save()?;
+
+            clear_active_startup(app_handle.clone());
 
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
             init_pomodoro(app.handle().clone());

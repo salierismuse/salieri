@@ -14,6 +14,8 @@ pub const TODO_FILE: &str = "tasks.json";
 pub const DONE_FILE: &str = "donetasks.json";
 
 static ACTIVE_TASK_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
+pub static ACTIVE_TASK: Lazy<Mutex<Option<Task>>> = Lazy::new(|| Mutex::new(None));
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -22,6 +24,42 @@ pub struct Task {
     pub status: String,
     pub created_at: String,
     pub time_spent: u64,
+}
+
+pub fn clear_active_startup(app_handle: AppHandle) -> Result<(), String> {
+    let today = chrono::Local::now().date_naive().to_string();
+    let mut tasks = fetch_tasks(&app_handle, &today, false)?; // false -> todo file
+
+    for task in tasks.iter_mut() {
+        if task.status == "doing" {
+            task.status = "todo".into();
+        }
+    }
+
+    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
+    store.set("tasks", serde_json::json!(tasks));
+    store.save().map_err(|e| e.to_string())
+}
+
+fn clear_active_task() {
+    let mut guard = ACTIVE_TASK.lock().unwrap();
+    if let Some(task) = guard.as_mut() {
+        task.status = "todo".into();
+    }
+    *guard = None;
+
+    let mut id_guard = ACTIVE_TASK_ID.lock().unwrap();
+    id_guard.clear();
+}
+
+fn set_active_task(task: Task) {
+    {
+        let mut id_guard = ACTIVE_TASK_ID.lock().unwrap();
+        *id_guard = task.id.clone();
+    }
+
+    let mut guard = ACTIVE_TASK.lock().unwrap();
+    *guard = Some(task);
 }
 
 pub fn start_task_timer_loop(app_handle: AppHandle) {
@@ -136,9 +174,9 @@ pub fn command_doing(parts: &[&str], app_handle: AppHandle) -> Result<String, St
             if task.status == "doing" {
                 return Err("already active task".into());
             }
+            clear_active_task();
             task.status = "doing".into();
-            let mut guard = ACTIVE_TASK_ID.lock().unwrap();
-            *guard = task.id.clone();
+            set_active_task(task.clone());
             activated = true;
         }
     }
