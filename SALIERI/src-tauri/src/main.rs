@@ -35,15 +35,19 @@ use lazy_static::lazy_static;
 use std::sync::{Mutex, Arc};
 use std::time::Duration;
 use tokio::time::{interval, Interval};
+use serde::{Serialize, Deserialize};
+use std::fs;
 
 
 // salieri's muse
 
-const THEME_KEY: &str           = "current_theme";
-const DEFAULT_THEME: &str       = "dark";
+const THEME_KEY: &str = "current_theme";
+const DEFAULT_THEME: &str = "dark";
 const SETTINGS_STORE_FILENAME: &str = "settings.json";
-const TODO_FILE: &str             = "tasks.json";
-const DONE_FILE: &str             = "donetasks.json";
+const TODO_FILE: &str = "tasks.json";
+const DONE_FILE: &str = "donetasks.json";
+const PROFILE_FILE: &str = "user.json";
+
 
 // keep track of "doing" task
 // should only be doing one task at once for flow
@@ -53,6 +57,44 @@ static ACTIVE_TASK_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new
 struct ThemeChangedPayload {
     theme: String,
 }
+
+// user stuff
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct User 
+{
+    tasks_done: u64, 
+    pomodoro_done: u64,
+    time_in_salieri: u64,
+}
+
+impl User {
+    fn load_user(app: &tauri::AppHandle) -> Result<User, String> {
+    let store = app.store(USER_STORE).map_err(|e| e.to_string())?;
+    let user = store
+        .get(USER_KEY)
+        .and_then(|v| serde_json::from_value(v.clone()).ok())
+        .unwrap_or_default(); // if nothing saved yet, default to empty user
+    Ok(user)
+}
+    fn save_user(app: &tauri::AppHandle, user: &User) -> Result<(), String> {
+        let store = app.store(USER_STORE).map_err(|e| e.to_string())?;
+        store.set(USER_KEY, serde_json::to_value(user).unwrap());
+        store.save().map_err(|e| e.to_string())
+    }
+}
+
+
+
+const USER_STORE: &str = "user.json";
+const USER_KEY: &str = "user";
+
+fn increment_tasks_done(app: tauri::AppHandle) -> Result<String, String> {
+    let mut user = User::load_user(&app)?;
+    user.tasks_done += 1;
+    User::save_user(&app, &user)?;
+    Ok(format!("tasks done: {}", user.tasks_done))
+}
+
 
 // salieri's muse
 
@@ -483,6 +525,7 @@ fn command_doing(parts: &[&str], app_handle: AppHandle) -> Result<String, String
     Err("task not found".into())
 }
 
+
 fn command_done(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
     if parts.len() < 2 {
         return Err("need task title".into());
@@ -517,7 +560,7 @@ fn command_done(parts: &[&str], app_handle: AppHandle) -> Result<String, String>
         if *guard == target_title {
             guard.clear();
         }
-
+        increment_tasks_done(app_handle);
         Ok("task moved to done".into())
     } else {
         Err("task not found".into())
@@ -571,7 +614,7 @@ fn handle_palette_command(command: String, app_handle: tauri::AppHandle) -> Resu
         Some(&"/pause") => command_pause_pomodoro(),
         Some(&"/stop") => command_stop_pomodoro(),
         Some(unknown_cmd) => Err(format!("unknown command: {}", unknown_cmd)),
-        None => Err("empty command received".into()), // Handle empty command string
+        None => Err("empty command received".into()), 
     }
 }
 
@@ -590,7 +633,7 @@ fn main() {
                     start_task_timer_loop(app_handle);
                 });
             });
-
+            
             // theme setup logic
             let store = app.store(SETTINGS_STORE_FILENAME)?;
 
