@@ -1,279 +1,257 @@
-use chrono::Local;
-use serde_json::json;
-use tauri_plugin_store::StoreExt;
+use chrono::{Local, Duration as ChronoDuration};
 use tauri::AppHandle;
 use uuid::Uuid;
 use once_cell::sync::Lazy;
-use std::sync::Mutex;
-use std::time::Duration;
-use serde::{Serialize, Deserialize};
+use std::{collections::HashMap, fs, path::{Path, PathBuf}, sync::Mutex, time::Duration};
+use directories::ProjectDirs;
+use tokio::sync::RwLock;
+use futures::executor;          // Cargo.toml: futures = "0.3"
+use serde::{Serialize, Deserialize, de::DeserializeOwned};
 
 use crate::user::increment_tasks_done;
 
-pub const TODO_FILE: &str = "tasks.json";
-pub const DONE_FILE: &str = "donetasks.json";
-
-static ACTIVE_TASK_ID: Lazy<Mutex<String>> = Lazy::new(|| Mutex::new(String::new()));
-pub static ACTIVE_TASK: Lazy<Mutex<Option<Task>>> = Lazy::new(|| Mutex::new(None));
-
+// ─── type aliases ────────────────────────────────────────────────────────
+type TaskId      = String;
+type LogicalDay  = String;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
     pub id: String,
     pub title: String,
-    pub status: String,
-    pub created_at: String,
-    pub time_spent: u64,
+    pub status: String,     // "todo" | "doing" | "done"
+    pub created_at: String, // logical-day key
+    pub time_spent: u64,    // seconds
 }
 
-pub fn clear_active_startup(app_handle: AppHandle) -> Result<(), String> {
-    let today = chrono::Local::now().date_naive().to_string();
-    let mut tasks = fetch_tasks(&app_handle, &today, false)?; // false -> todo file
+#[derive(Clone, Serialize, Deserialize, Default)]
+struct DayBucket {
+    todo: HashMap<TaskId, Task>,
+    done: HashMap<TaskId, Task>,
+}
 
-    for task in tasks.iter_mut() {
-        if task.status == "doing" {
-            task.status = "todo".into();
+type Store = HashMap<LogicalDay, DayBucket>;
+
+// ─── day helpers ─────────────────────────────────────────────────────────
+fn today_key() -> LogicalDay {
+    (Local::now() - ChronoDuration::hours(4)).format("%Y-%m-%d").to_string()
+}
+
+// ─── disk helpers ────────────────────────────────────────────────────────
+fn data_dir() -> PathBuf {
+    ProjectDirs::from("com", "salieri", "salieri")
+        .map(|d| d.data_local_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn store_path() -> PathBuf { data_dir().join("tasks_store.json") }
+
+fn ensure_data_dir() {
+    let dir = data_dir();
+    if !dir.exists() { let _ = fs::create_dir_all(&dir); }
+}
+
+fn load_json<T: DeserializeOwned>(p: &Path) -> Result<T, String> {
+    if !p.exists() { return Err("missing".into()); }
+    serde_json::from_str(&fs::read_to_string(p).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+fn save_json<T: Serialize>(p: &Path, d: &T) -> Result<(), String> {
+    ensure_data_dir();
+    fs::write(p, serde_json::to_string_pretty(d).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}
+
+fn load_store() -> Result<Store, String> {
+    load_json(&store_path()).or_else(|_| Ok(Store::new()))
+}
+
+fn save_store(st: &Store) -> Result<(), String> {
+    save_json(&store_path(), st)
+}
+
+fn bucket_mut<'a>(st: &'a mut Store, day: &LogicalDay) -> &'a mut DayBucket {
+    st.entry(day.clone()).or_insert_with(DayBucket::default)
+}
+
+// ─── globals ────────────────────────────────────────────────────────────
+static ACTIVE_TASK_ID: Lazy<RwLock<Option<TaskId>>> = Lazy::new(|| RwLock::new(None));
+static ACTIVE_TASK:    Lazy<Mutex<Option<Task>>>    = Lazy::new(|| Mutex::new(None));
+
+// ─── startup fix ────────────────────────────────────────────────────────
+pub fn clear_active_startup(_h: AppHandle) -> Result<(), String> {
+    let mut store = load_store()?;
+    if let Some(bucket) = store.get_mut(&today_key()) {
+        for t in bucket.todo.values_mut() {
+            if t.status == "doing" { t.status = "todo".into(); }
         }
     }
-
-    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    store.set("tasks", serde_json::json!(tasks));
-    store.save().map_err(|e| e.to_string())
+    save_store(&store)
 }
 
+// ─── active helpers ─────────────────────────────────────────────────────
 fn clear_active_task() {
-    let mut guard = ACTIVE_TASK.lock().unwrap();
-    if let Some(task) = guard.as_mut() {
-        task.status = "todo".into();
-    }
-    *guard = None;
-
-    let mut id_guard = ACTIVE_TASK_ID.lock().unwrap();
-    id_guard.clear();
+    *ACTIVE_TASK.lock().unwrap() = None;
+    executor::block_on(async { *ACTIVE_TASK_ID.write().await = None; });
 }
 
 fn set_active_task(task: Task) {
-    {
-        let mut id_guard = ACTIVE_TASK_ID.lock().unwrap();
-        *id_guard = task.id.clone();
-    }
-
-    let mut guard = ACTIVE_TASK.lock().unwrap();
-    *guard = Some(task);
+    let id = task.id.clone();
+    *ACTIVE_TASK.lock().unwrap() = Some(task);
+    executor::block_on(async { *ACTIVE_TASK_ID.write().await = Some(id); });
 }
 
-pub fn start_task_timer_loop(app_handle: AppHandle) {
+// ─── timer loop ─────────────────────────────────────────────────────────
+pub fn start_task_timer_loop(_h: AppHandle) {
     tokio::spawn(async move {
         let mut ticker = tokio::time::interval(Duration::from_secs(1));
+        let mut tick_count = 0u8;
         loop {
             ticker.tick().await;
-
-            let active_id = {
-                let guard = ACTIVE_TASK_ID.lock().unwrap();
-                guard.clone()
-            };
-
-            if active_id.is_empty() {
-                continue;
-            }
-
-            let store = match app_handle.store(TODO_FILE) {
-                Ok(s) => s,
-                Err(_) => continue,
-            };
-
-            let mut tasks: Vec<Task> = store
-                .get("tasks")
-                .and_then(|v| serde_json::from_value(v.clone()).ok())
-                .unwrap_or_default();
-
-            let mut changed = false;
-
-            for task in tasks.iter_mut() {
-                if task.id == active_id && task.status == "doing" {
+            tick_count = tick_count.wrapping_add(1);
+            let Some(id) = ACTIVE_TASK_ID.read().await.clone() else { continue };
+            let mut store = load_store().unwrap_or_default();
+            if let Some(bucket) = store.get_mut(&today_key()) {
+                if let Some(task) = bucket.todo.get_mut(&id) {
                     task.time_spent += 1;
-                    changed = true;
-                    break;
+                    if tick_count % 60 == 0 { let _ = save_store(&store); }
                 }
-            }
-
-            if changed {
-                let _ = store.set("tasks", json!(tasks));
-                let _ = store.save();
             }
         }
     });
 }
 
-fn fetch_tasks(app: &AppHandle, day: &str, done: bool) -> Result<Vec<Task>, String> {
-    let file = if done { DONE_FILE } else { TODO_FILE };
-    let store = app.store(file).map_err(|e| e.to_string())?;
-    let list: Vec<Task> = store.get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-    Ok(list.into_iter().filter(|t| t.created_at.starts_with(day)).collect())
-}
-
+// ─── query API ──────────────────────────────────────────────────────────
 #[tauri::command]
-pub fn get_tasks(app: AppHandle, day: String, done: bool) -> Result<Vec<Task>, String> {
-    fetch_tasks(&app, &day, done)
+pub fn get_tasks(_h: AppHandle, day: String, done: bool) -> Result<Vec<Task>, String> {
+    let store = load_store()?;
+    let bucket = store.get(&day).cloned().unwrap_or_default();
+    Ok(if done { bucket.done } else { bucket.todo }
+        .into_values()
+        .collect())
 }
 
-pub fn command_todo(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
-    if parts.len() < 2 {
-        return Err("need task title".into());
-    }
+// ─── macro ──────────────────────────────────────────────────────────────
+macro_rules! ensure_title { ($p:expr) => { if $p.len() < 2 { return Err("need task title".into()); } }; }
 
+// ─── /todo ──────────────────────────────────────────────────────────────
+pub fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+    ensure_title!(parts);
     let title = parts[1..].join(" ");
-    let new_task = Task {
-        id: Uuid::new_v4().to_string(),
-        title: title.clone(),
-        created_at: Local::now().date_naive().to_string(),
-        status: "todo".into(),
-        time_spent: 0,
+
+    let mut store = load_store()?;
+    let day = today_key();
+    let bucket = bucket_mut(&mut store, &day);
+
+    if bucket.todo.values().any(|t| t.title == title) || bucket.done.values().any(|t| t.title == title) {
+        return Err("duplicate title".into());
+    }
+
+    let task = Task { id: Uuid::new_v4().to_string(), title: title.clone(), status: "todo".into(), created_at: day.clone(), time_spent: 0 };
+    bucket.todo.insert(task.id.clone(), task);
+    save_store(&store)?;
+    Ok("added".into())
+}
+
+// ─── /doing ─────────────────────────────────────────────────────────────
+pub fn command_doing(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+    ensure_title!(parts);
+    let title = parts[1..].join(" ");
+
+    let mut store = load_store()?;
+    let day = today_key();
+    let bucket = bucket_mut(&mut store, &day);
+
+    let old_id = ACTIVE_TASK_ID.blocking_read().clone();
+
+    let Some((id, task)) = bucket.todo.iter_mut().find(|(_, t)| t.title == title).map(|(i, t)| (i.clone(), t)) else {
+        return Err("task not found".into());
     };
 
-    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    let mut tasks: Vec<Task> = store
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    if task.status == "doing" { return Err("already active".into()); }
 
-    tasks.push(new_task.clone());
-    store.set("tasks", json!(tasks));
-    store.save().map_err(|e| e.to_string())?;
+    clear_active_task();
+    task.status = "doing".into();
+    set_active_task(task.clone());
 
-    Ok(format!("added task: {}", new_task.title))
+    if let Some(old) = old_id {
+        if let Some(t) = bucket.todo.get_mut(&old) { t.status = "todo".into(); }
+    }
+
+    save_store(&store)?;
+    Ok("task active".into())
 }
 
-pub fn command_doing(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
-    if parts.len() < 2 {
-        return Err("need task title".into());
-    }
-    let active_task = parts[1..].join(" ");
+// ─── /done ──────────────────────────────────────────────────────────────
+pub fn command_done(parts: &[&str], h: AppHandle) -> Result<String, String> {
+    ensure_title!(parts);
+    let title = parts[1..].join(" ");
 
-    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    let mut tasks: Vec<Task> = store
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
+    let mut store = load_store()?;
+    let day = today_key();
+    let bucket = bucket_mut(&mut store, &day);
 
-    let old_active_id = {
-        let guard = ACTIVE_TASK_ID.lock().unwrap();
-        guard.clone()
+    // find task by title in today's todo list
+    let Some(task_id) = bucket.todo.iter().find(|(_, t)| t.title == title).map(|(id, _)| id.clone()) else {
+        return Err("task not found".into());
     };
 
-    let mut old_index: Option<usize> = None;
-    let mut activated = false;
+    let mut task = bucket.todo.remove(&task_id).unwrap();
+    task.status = "done".into();
+    bucket.done.insert(task_id.clone(), task);
 
-    for (i, task) in tasks.iter_mut().enumerate() {
-        if task.id == old_active_id && task.title != active_task {
-            old_index = Some(i);
-        }
-        if task.title == active_task {
-            if task.status == "doing" {
-                return Err("already active task".into());
-            }
-            clear_active_task();
-            task.status = "doing".into();
-            set_active_task(task.clone());
-            activated = true;
-        }
+    // if that task was active, clear globals
+    if ACTIVE_TASK_ID.blocking_read().as_deref() == Some(&task_id) {
+        clear_active_task();
     }
 
-    if activated {
-        if let Some(idx) = old_index {
-            tasks[idx].status = "todo".into();
-        }
-        store.set("tasks", serde_json::to_value(&tasks).unwrap());
-        store.save().map_err(|e| e.to_string())?;
-        return Ok("task active".into());
-    }
-    Err("task not found".into())
+    increment_tasks_done(h);
+    save_store(&store)?;
+    Ok("task moved to done".into())
 }
 
-pub fn command_done(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
-    if parts.len() < 2 {
-        return Err("need task title".into());
-    }
-    let target_title = parts[1..].join(" ");
+// ─── /break ─────────────────────────────────────────────────────────────
+pub fn command_break(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+    ensure_title!(parts);
+    let title = parts[1..].join(" ");
 
-    let store_todo  = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    let store_done  = app_handle.store(DONE_FILE).map_err(|e| e.to_string())?;
+    let mut store = load_store()?;
+    let day = today_key();
+    let bucket = bucket_mut(&mut store, &day);
 
-    let mut todo_tasks: Vec<Task> = store_todo
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    let mut done_tasks: Vec<Task> = store_done
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    if let Some(pos) = todo_tasks.iter().position(|t| t.title == target_title) {
-        let mut finished = todo_tasks.remove(pos);
-        finished.status = "done".into();
-        done_tasks.push(finished);
-
-        store_todo.set("tasks", json!(todo_tasks));
-        store_todo.save().map_err(|e| e.to_string())?;
-
-        store_done.set("tasks", json!(done_tasks));
-        store_done.save().map_err(|e| e.to_string())?;
-
-        let mut guard = ACTIVE_TASK_ID.lock().unwrap();
-        if *guard == target_title {
-            guard.clear();
-        }
-        increment_tasks_done(app_handle);
-        Ok("task moved to done".into())
-    } else {
-        Err("task not found".into())
-    }
-}
-
-pub fn command_break(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
-    if parts.len() < 2 {
-        return Err("need task title".into());
-    }
-    let active_task = parts[1..].join(" ");
-
-    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    let mut tasks: Vec<Task> = store
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-
-    for task in tasks.iter_mut() {
-        if task.title == active_task && task.status == "doing" {
+    for task in bucket.todo.values_mut() {
+        if task.title == title && task.status == "doing" {
             task.status = "todo".into();
-            store.set("tasks", serde_json::to_value(&tasks).unwrap());
-            store.save().map_err(|e| e.to_string())?;
+            clear_active_task();
+            save_store(&store)?;
             return Ok("task paused".into());
         }
     }
     Err("task not active".into())
 }
 
-pub fn command_deleteT(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
-    if parts.len() < 2 {
-        return Err("need task title".into());
+// ─── /deleteT ───────────────────────────────────────────────────────────
+pub fn command_deleteT(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+    ensure_title!(parts);
+    let title = parts[1..].join(" ");
+
+    let mut store = load_store()?;
+    let day = today_key();
+    let bucket = bucket_mut(&mut store, &day);
+
+    let Some(task_id) = bucket.todo.iter().find(|(_, t)| t.title == title).map(|(id, _)| id.clone()) else {
+        return Err("task not found".into());
+    };
+
+    bucket.todo.remove(&task_id);
+    if ACTIVE_TASK_ID.blocking_read().as_deref() == Some(&task_id) {
+        clear_active_task();
     }
-    let deleted_task = parts[1..].join(" ");
-    let store = app_handle.store(TODO_FILE).map_err(|e| e.to_string())?;
-    let mut tasks: Vec<Task> = store 
-        .get("tasks")
-        .and_then(|v| serde_json::from_value(v.clone()).ok())
-        .unwrap_or_default();
-     tasks.retain(|t| t.title != deleted_task);
-    store
-        .set("tasks", serde_json::to_value(&tasks).unwrap());
-    store.save().map_err(|e| e.to_string())?;
-    Err("task not active".into())
+    save_store(&store)?;
+    Ok("task deleted".into())
 }
 
-
+// ─── /completed (placeholder) ───────────────────────────────────────────
 pub fn command_completed() -> Result<String, String> {
     Ok("success".into())
 }
