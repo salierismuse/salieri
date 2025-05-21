@@ -15,6 +15,7 @@
   let commandInput = '';
   let commandOutput = '';
   let done = false;
+  let currentLogicalDay = writable('');
 
   /* ───── lifecycle ───── */
  onMount(async () => {
@@ -23,8 +24,10 @@
       theme.set(initialTheme);
 
       // initial tasks loading
-      const today = new Date().toLocaleDateString('en-CA');
-      await load_tasks_for_day(today);
+      const logicalDayKey = await invoke<string>('get_current_logical_day_key');
+      currentLogicalDay.set(logicalDayKey); // Store it if needed elsewhere
+
+      await load_tasks_for_day(logicalDayKey);
 
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);

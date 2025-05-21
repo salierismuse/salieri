@@ -33,6 +33,10 @@ lazy_static! {
 }
 
 
+#[tauri::command]
+pub fn get_current_logical_day_key() -> String {
+    today_key() // Uses your existing -4 hours logic
+}
 
 async fn persist_global_store() -> Result<(), String> {
     let store_guard = TASK_STORE.lock().await;

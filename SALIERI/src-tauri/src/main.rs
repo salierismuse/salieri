@@ -7,7 +7,7 @@ mod tasks;
 mod commands;
 
 use crate::theme::{set_theme, get_current_theme, ThemeChangedPayload, THEME_KEY, DEFAULT_THEME, SETTINGS_STORE_FILENAME};
-use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup};
+use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup, get_current_logical_day_key};
 use crate::pomodoro::init_pomodoro;
 use crate::commands::handle_palette_command;
 
@@ -57,6 +57,7 @@ fn main() {
             get_current_theme,
             handle_palette_command,
             get_tasks
+            ,get_current_logical_day_key
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
