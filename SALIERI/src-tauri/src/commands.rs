@@ -14,19 +14,19 @@ pub fn command_date() -> Result<String, String> {
     Ok(now.format("%Y-%m-%d %H:%M:%S").to_string())
 }
 
-pub fn command_theme(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
+pub async fn command_theme(parts: &[&str], app_handle: AppHandle) -> Result<String, String> {
     match parts.get(1) {
-        Some(&"dark") => tauri::async_runtime::block_on(set_theme(app_handle, "dark".into()))
+        Some(&"dark") => set_theme(app_handle, "dark".into()).await
             .map(|_| "theme set to dark".into()),
 
-        Some(&"light") => tauri::async_runtime::block_on(set_theme(app_handle, "light".into()))
+        Some(&"light") => set_theme(app_handle, "light".into()).await
             .map(|_| "theme set to light".into()),
 
         Some(&"toggle") => {
-            match tauri::async_runtime::block_on(get_current_theme(app_handle.clone())) {
+            match get_current_theme(app_handle.clone()).await {
                 Ok(current) => {
                     let new_theme = if current == "dark" { "light" } else { "dark" };
-                    tauri::async_runtime::block_on(set_theme(app_handle, new_theme.into()))
+                    set_theme(app_handle, new_theme.into()).await
                         .map(|_| format!("theme toggled to {new_theme}"))
                 }
                 Err(e) => Err(format!("couldn't read theme: {e}")),
@@ -39,24 +39,24 @@ pub fn command_theme(parts: &[&str], app_handle: AppHandle) -> Result<String, St
 }
 
 #[tauri::command]
-pub fn handle_palette_command(command: String, app_handle: AppHandle) -> Result<String, String> {
+pub async fn handle_palette_command(command: String, app_handle: AppHandle) -> Result<String, String> {
     let trimmed_command = command.trim();
     let parts: Vec<&str> = trimmed_command.split_whitespace().collect();
 
     match parts.get(0) {
         Some(&"ping") => command_ping(),
         Some(&"date") => command_date(),
-        Some(&"/theme") => command_theme(&parts, app_handle),
-        Some(&"/todo") => command_todo(&parts, app_handle),
-        Some(&"/doing") => command_doing(&parts, app_handle),
-        Some(&"/done") => command_done(&parts, app_handle),
-        Some(&"/break") => command_break(&parts, app_handle),
-        Some(&"/deleteT") => command_deleteT(&parts, app_handle),
+        Some(&"/theme") => command_theme(&parts, app_handle).await,
+        Some(&"/todo") => command_todo(&parts, app_handle).await,
+        Some(&"/doing") => command_doing(&parts, app_handle).await,
+        Some(&"/done") => command_done(&parts, app_handle).await,
+        Some(&"/break") => command_break(&parts, app_handle).await,
+        Some(&"/deleteT") => command_deleteT(&parts, app_handle).await,
         Some(&"/completed") => command_completed(), 
-        Some(&"/start") => command_start_pomodoro(),
-        Some(&"/pause") => command_pause_pomodoro(),
-        Some(&"/resume") => command_resume_pomodoro(),
-        Some(&"/stop") => command_stop_pomodoro(),
+        Some(&"/start") => command_start_pomodoro().await,
+        Some(&"/pause") => command_pause_pomodoro().await,
+        Some(&"/resume") => command_resume_pomodoro().await,
+        Some(&"/stop") => command_stop_pomodoro().await,
         Some(unknown_cmd) => Err(format!("unknown command: {}", unknown_cmd)),
         None => Err("empty command received".into()), 
     }

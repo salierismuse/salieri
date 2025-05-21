@@ -5,6 +5,7 @@ use lazy_static::lazy_static;
 use once_cell::sync::OnceCell;
 use tauri::{AppHandle, Emitter};
 use tokio::time;
+use tokio::sync::Mutex as TokioMutex;
 
 use crate::user::increment_pomodoros_done;
 
@@ -195,11 +196,11 @@ impl PomodoroTimer {
 // ───────────────────────── module globals ────────────────────────────────
 
 lazy_static! {
-    static ref POMODORO: Mutex<Option<PomodoroTimer>> = Mutex::new(None);
+    static ref POMODORO: TokioMutex<Option<PomodoroTimer>> = TokioMutex::new(None);
 }
 
-pub fn init_pomodoro(app: AppHandle) {
-    let mut guard = POMODORO.lock().unwrap();
+pub async fn init_pomodoro(app: AppHandle) { 
+    let mut guard = POMODORO.lock().await;
     *guard = Some(PomodoroTimer::new(app));
 }
 
@@ -207,63 +208,61 @@ pub fn init_pomodoro(app: AppHandle) {
 
 #[tauri::command]
 pub async fn start_timer() -> Result<(), String> {
-    POMODORO
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or("pomodoro timer not initialized".to_string())?
-        .start()
-        .await
-        .map_err(|e| e.into())
+    let guard = POMODORO.lock().await; // Async lock
+    if let Some(timer) = guard.as_ref() {
+        timer.start().await.map_err(|e| e.to_string()) // timer.start() is already async
+    } else {
+        Err("pomodoro timer not initialized".to_string())
+    }
+}
+
+
+#[tauri::command]
+pub async fn resume_timer() -> Result<(), String> { 
+    let guard = POMODORO.lock().await; 
+    if let Some(timer) = guard.as_ref() {
+        timer.resume().map_err(|e| e.to_string())
+    } else {
+        Err("pomodoro timer not initialized".to_string())
+    }
 }
 
 #[tauri::command]
-pub fn resume_timer() -> Result<(), String> {
-    POMODORO
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or("pomodoro timer not initialized".to_string())?
-        .resume()
-        .map_err(|e| e.into())
+pub async fn pause_timer() -> Result<(), String> {
+    let guard = POMODORO.lock().await;
+    if let Some(timer) = guard.as_ref() {
+        timer.pause(); 
+        Ok(())
+    } else {
+        Err("pomodoro timer not initialized".to_string())
+    }
 }
 
 #[tauri::command]
-pub fn pause_timer() -> Result<(), String> {
-    POMODORO
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or("pomodoro timer not initialized".to_string())?
-        .pause();
-    Ok(())
-}
-
-#[tauri::command]
-pub fn stop_timer() -> Result<(), String> {
-    POMODORO
-        .lock()
-        .unwrap()
-        .as_ref()
-        .ok_or("pomodoro timer not initialized".to_string())?
-        .stop();
-    Ok(())
+pub async fn stop_time() -> Result<(), String> {
+    let guard = POMODORO.lock().await;
+    if let Some(timer) = guard.as_ref() {
+        timer.stop();
+        Ok(())
+    } else {
+        Err("pomodoro timer not initialized".to_string())
+    }
 }
 
 // ───────────── convenience wrappers for invoke() callers ────────────────
 
-pub fn command_start_pomodoro() -> Result<String, String> {
-    tauri::async_runtime::block_on(start_timer()).map(|_| "pomodoro started".into())
+pub async fn command_start_pomodoro() -> Result<String, String> {
+    start_timer().await.map(|_| "pomodoro started".into())
 }
 
-pub fn command_resume_pomodoro() -> Result<String, String> {
-    resume_timer().map(|_| "pomodoro resumed".into())
+pub async fn command_resume_pomodoro() -> Result<String, String> {
+    resume_timer().await.map(|_| "pomodoro resumed".into())
 }
 
-pub fn command_pause_pomodoro() -> Result<String, String> {
-    pause_timer().map(|_| "pomodoro paused".into())
+pub async fn command_pause_pomodoro() -> Result<String, String> {
+    pause_timer().await.map(|_| "pomodoro paused".into())
 }
 
-pub fn command_stop_pomodoro() -> Result<String, String> {
-    stop_timer().map(|_| "pomodoro stopped".into())
+pub async fn command_stop_pomodoro() -> Result<String, String> {
+    stop_time().await.map(|_| "pomodoro stopped".into())
 }

@@ -22,16 +22,14 @@ fn main() {
             let app_handle = app.handle().clone();
             let bg_handle = app.handle().clone();
 
-            std::thread::spawn(move || {
-                tauri::async_runtime::spawn(async move {
-                    start_task_timer_loop(bg_handle);
-                });
-            });
+        tauri::async_runtime::spawn_blocking(move || {
+            start_task_timer_loop(bg_handle);
+        });
 
             let store = app.store(SETTINGS_STORE_FILENAME)?;
 
             let theme_value = match store.get(THEME_KEY) {
-                Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
+                Some(v) => v.as_str().map(|s| s.to_string()).unwrap_or_else(|| {    
                     println!("invalid theme value in store, resetting to default");
                     store.set(THEME_KEY, json!(DEFAULT_THEME));
                     let _ = store.save();
@@ -47,12 +45,10 @@ fn main() {
 
             println!("initial theme value: {}", theme_value);
 
-            store.save()?;
-
-            clear_active_startup(app_handle.clone());
+            tauri::async_runtime::block_on(clear_active_startup(app_handle.clone()));
 
             app.emit("theme_changed", ThemeChangedPayload { theme: theme_value })?;
-            init_pomodoro(app.handle().clone());
+            tauri::async_runtime::block_on(init_pomodoro(app_handle.clone()));  
 
             Ok(())
         })
