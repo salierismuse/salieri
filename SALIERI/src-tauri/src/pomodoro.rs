@@ -26,31 +26,29 @@ pub enum TimerState {
 }
 
 pub struct PomodoroTimer {
-    // runtime state --------------------------------------------------------
-    state: Arc<Mutex<TimerState>>,                // current timer phase
-    last_active_state: Arc<Mutex<Option<TimerState>>>, // where to resume after pause
+    // runtime state
+    state: Arc<Mutex<TimerState>>,                
+    last_active_state: Arc<Mutex<Option<TimerState>>>, 
 
-    remaining_seconds: Arc<Mutex<u64>>,           // seconds left in the phase
-    current_session: Arc<Mutex<u32>>,             // completed work sessions so far
+    remaining_seconds: Arc<Mutex<u64>>,           
+    current_session: Arc<Mutex<u32>>,             
 
-    // constants ------------------------------------------------------------
+    // constants 
     work_duration: Duration,
     short_break_duration: Duration,
     long_break_duration: Duration,
     sessions_before_long_break: u32,
-    interval_time: u64,                           // tick size in seconds
+    interval_time: u64,                           
 
-    // integration ----------------------------------------------------------
     app_handle: AppHandle,
 }
 
 impl PomodoroTimer {
     pub fn new(app_handle: AppHandle) -> Self {
-        // make the defaults tiny for demo – tweak as needed
-        let work_secs = 5; // seconds
-        let short_break_secs = 5; // seconds
-        let long_break_secs = 15 * 60; // seconds
-        let interval_time = 1; // tick every second
+        let work_secs = 5; 
+        let short_break_secs = 5; 
+        let long_break_secs = 15 * 60; 
+        let interval_time = 1;
 
         Self {
             state: Arc::new(Mutex::new(TimerState::Idle)),
@@ -80,7 +78,7 @@ impl PomodoroTimer {
         Ok(())
     }
 
-    pub fn resume(&self) -> Result<(), &'static str> {
+    pub async fn resume(&self) -> Result<(), &'static str> {
         if *self.state.lock().unwrap() != TimerState::Paused {
             return Err("timer is not paused");
         }
@@ -91,7 +89,7 @@ impl PomodoroTimer {
             .take()
             .unwrap_or(TimerState::Running);
         let secs_left = *self.remaining_seconds.lock().unwrap();
-        tauri::async_runtime::block_on(self.boot_cycle(prev, secs_left));
+        self.boot_cycle(prev, secs_left).await;
         Ok(())
     }
 
@@ -130,7 +128,6 @@ impl PomodoroTimer {
     }
 
     fn spawn_loop(&self) {
-        // capture everything we need by value so the future is 'static & Send
         let st = Arc::clone(&self.state);
         let remain = Arc::clone(&self.remaining_seconds);
         let session = Arc::clone(&self.current_session);
@@ -139,9 +136,8 @@ impl PomodoroTimer {
         let lbreak_secs = self.long_break_duration.as_secs();
         let work_secs = self.work_duration.as_secs();
         let every = self.sessions_before_long_break;
-        let tick = self.interval_time; // capture primitive, no borrow
+        let tick = self.interval_time; 
 
-        // use tauri runtime: no Send requirement, but future is 'static now anyway
         tauri::async_runtime::spawn(async move {
             loop {
                 time::sleep(Duration::from_secs(tick)).await;
@@ -216,12 +212,11 @@ pub async fn start_timer() -> Result<(), String> {
     }
 }
 
-
 #[tauri::command]
 pub async fn resume_timer() -> Result<(), String> { 
     let guard = POMODORO.lock().await; 
     if let Some(timer) = guard.as_ref() {
-        timer.resume().map_err(|e| e.to_string())
+        timer.resume().await.map_err(|e| e.to_string())
     } else {
         Err("pomodoro timer not initialized".to_string())
     }
