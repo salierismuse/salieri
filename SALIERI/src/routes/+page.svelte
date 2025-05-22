@@ -6,8 +6,10 @@
   import { tasks, type Task } from '$lib/stores';
   import { basicSetup } from 'codemirror'; 
   import {EditorView, keymap} from "@codemirror/view"; 
-  import {defaultKeymap} from "@codemirror/commands"
+  import {defaultKeymap, selectPageDown} from "@codemirror/commands"
   import { EditorState } from '@codemirror/state';
+  import { get } from 'svelte/store';
+  import { tick } from 'svelte';
 
   export const theme = writable<'light' | 'dark'>('dark');
   export const timerState = writable<'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak'>('Idle');
@@ -20,12 +22,8 @@
   let done = false; 
   let currentLogicalDay = writable('');
   let editorDiv: HTMLDivElement;
-
-  let myView = new EditorView({
-    doc: "hello",
-    extensions: [keymap.of(defaultKeymap)],
-    parent: document.body
-  })
+  const showEditor = writable(false);
+  let myView: EditorView | null = null;
 
   onMount(async () => {
     try {
@@ -55,18 +53,7 @@
 
     });
 
-      // codemirror stuff
-    const state = EditorState.create({
-      doc: 'amadeus was once here',          
-      extensions: [basicSetup]
-    });
-
-    let myView = new EditorView({
-      doc: "hello",
-      extensions: [keymap.of(defaultKeymap)],
-      parent: editorDiv,
-    })
-
+    toggleEditor();
 
     } catch (e) {
       console.error('Failed to initialize:', e);
@@ -83,6 +70,11 @@
     const cmd = commandInput.trim();
     commandInput = '';
 
+    if (cmd === '/code')
+    {
+      toggleEditor();
+    }
+
     try {
       commandOutput = await invoke('handle_palette_command', { command: cmd });
     } catch (e) {
@@ -95,6 +87,8 @@
     if (cmd === '/start') await invoke('start_timer');
     else if (cmd === '/pause') await invoke('pause_timer');
     else if (cmd === '/stop') await invoke('stop_timer');
+
+
 
     // task filter state update
     if (cmd.startsWith('/todo')) done = false;
@@ -118,6 +112,36 @@
       console.error('failed loading tasks:', e);
     }
   }
+
+
+  async function toggleEditor() {
+  const next = !get(showEditor);
+  showEditor.set(next);
+
+  if (next) {
+    await tick();                // wait until <div> is in the DOM
+    mountEditor();               // now editorDiv is live
+  } else {
+    myView?.destroy();           // clean up
+    myView = null;
+  }
+}
+
+function mountEditor() {
+  if (!editorDiv) return;        // safety
+
+  myView?.destroy();             // nuke any previous instance
+
+  const state = EditorState.create({
+    doc: 'amadeus was once here',
+    extensions: [basicSetup]
+  });
+
+  myView = new EditorView({
+    state,
+    parent: editorDiv
+  });
+}
 
   function formatTime(totalSeconds: number): string {
     const minutes = Math.floor(totalSeconds / 60);
@@ -144,7 +168,6 @@
 
 <main>
   <h1>salieri</h1>
-
   <div class="page-content">
     <div class="left-panel tasks-list-container">
       <h2>tasks!</h2>
@@ -160,7 +183,6 @@
         <p>not a task yet, get to work!</p>
       {/if}
     </div>
-
     <div class="center-panel">
       <div class="active-task-display">
         <h3>active task</h3>
@@ -183,11 +205,13 @@
         <p>state: {$timerState}</p>
       </div>
     </div>
-
-    <div class="codemirror_holder" bind:this={editorDiv}>
-      </div>
-  </div>
-
+    <div class="right-pane">
+      {#if $showEditor}
+      <div class="codemirror_holder" bind:this={editorDiv}>
+        </div>
+      {/if} 
+    </div>
+</div>
   <div class="commandline-footer">
     <input
       type="text"
@@ -314,9 +338,9 @@
     font-size: 0.9em;
   }
 
-
-  .codemirror_holder {
+  .right-pane {
     flex-basis: 50%;
+    width: 50%;
     background-color: var(--yellow-panel-bg);
     color: var(--yellow-panel-fg);
     padding: 1em; 
