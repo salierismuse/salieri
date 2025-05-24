@@ -24,6 +24,21 @@
   let editorDiv: HTMLDivElement;
   const showEditor = writable(false);
   let myView: EditorView | null = null;
+  let showCommands = false;
+
+  const commands = [
+    { cmd: '/todo [task]', desc: 'add new task' },
+    { cmd: '/doing [task]', desc: 'start working on task' },
+    { cmd: '/done [task]', desc: 'mark task complete' },
+    { cmd: '/break [task]', desc: 'pause current task' },
+    { cmd: '/deleteT [task]', desc: 'delete task' },
+    { cmd: '/start', desc: 'begin pomodoro' },
+    { cmd: '/pause', desc: 'pause timer' },
+    { cmd: '/resume', desc: 'resume timer' },
+    { cmd: '/stop', desc: 'stop timer' },
+    { cmd: '/code', desc: 'toggle code editor' },
+    { cmd: '/theme [dark|light|toggle]', desc: 'change theme' }
+  ];
 
   onMount(async () => {
     try {
@@ -48,15 +63,10 @@
         const timerPayload = payload as { state: 'idle' | 'running' | 'paused' | 'shortbreak' | 'longbreak'; remaining_time: number };
         timerState.set(timerPayload.state.charAt(0).toUpperCase() + timerPayload.state.slice(1) as 'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak');
         remainingTime.set(timerPayload.remaining_time);
-
-        
-
-    });
-
-    toggleEditor();
+      });
 
     } catch (e) {
-      console.error('Failed to initialize:', e);
+      console.error('failed to initialize:', e);
     }
   });
 
@@ -69,10 +79,16 @@
     if (commandInput.trim() === '') return;
     const cmd = commandInput.trim();
     commandInput = '';
+    showCommands = false;
 
-    if (cmd === '/code')
-    {
+    if (cmd === '/?') {
+      showCommands = !showCommands;
+      return;
+    }
+
+    if (cmd === '/code') {
       toggleEditor();
+      return;
     }
 
     try {
@@ -88,8 +104,6 @@
     else if (cmd === '/pause') await invoke('pause_timer');
     else if (cmd === '/stop') await invoke('stop_timer');
 
-
-
     // task filter state update
     if (cmd.startsWith('/todo')) done = false;
     else if (cmd.startsWith('/completed')) done = true;
@@ -101,6 +115,8 @@
     if (event.key === 'Enter') {
       event.preventDefault();
       submitCommand();
+    } else if (event.key === 'Escape') {
+      showCommands = false;
     }
   }
 
@@ -113,41 +129,61 @@
     }
   }
 
-
   async function toggleEditor() {
-  const next = !get(showEditor);
-  showEditor.set(next);
+    const next = !get(showEditor);
+    showEditor.set(next);
 
-  if (next) {
-    await tick();                // wait until <div> is in the DOM
-    mountEditor();               // now editorDiv is live
-  } else {
-    myView?.destroy();           // clean up
-    myView = null;
+    if (next) {
+      await tick();
+      mountEditor();
+    } else {
+      myView?.destroy();
+      myView = null;
+    }
   }
-}
 
-function mountEditor() {
-  if (!editorDiv) return;        // safety
+  function mountEditor() {
+    if (!editorDiv) return;
 
-  myView?.destroy();             // nuke any previous instance
+    myView?.destroy();
 
-  const state = EditorState.create({
-    doc: 'amadeus was once here',
-    extensions: [basicSetup]
-  });
+    const state = EditorState.create({
+      doc: '// focus mode activated\n// let the code flow...\n\n',
+      extensions: [basicSetup]
+    });
 
-  myView = new EditorView({
-    state,
-    parent: editorDiv
-  });
-}
+    myView = new EditorView({
+      state,
+      parent: editorDiv
+    });
+  }
 
   function formatTime(totalSeconds: number): string {
     const minutes = Math.floor(totalSeconds / 60);
     const seconds = totalSeconds % 60;
-    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
+
+  function getTimerStateIcon(state: string): string {
+    switch (state) {
+      case 'Running': return '▶';
+      case 'Paused': return '⏸';
+      case 'ShortBreak': return '☕';
+      case 'LongBreak': return '🌙';
+      default: return '⏹';
+    }
+  }
+
+  function getTimerProgress(): number {
+    const total = $timerState === 'ShortBreak' ? 5 * 60 : 
+                  $timerState === 'LongBreak' ? 15 * 60 : 
+                  5 * 60; // work duration
+    return (1 - $remainingTime / total) * 100;
+  }
+
+  $: activeTask = $tasks.find(t => t.status === 'doing');
+  $: todoTasks = $tasks.filter(t => t.status === 'todo');
+  $: doneTasks = $tasks.filter(t => t.status === 'done');
 
   $: { 
     if (typeof document !== 'undefined' && document.documentElement) {
@@ -167,225 +203,506 @@ function mountEditor() {
 </script>
 
 <main>
-  <h1>salieri</h1>
-  <div class="page-content">
-    <div class="left-panel tasks-list-container">
-      <h2>tasks!</h2>
-      {#if $tasks.length > 0}
-        <ul>
-          {#each $tasks as task (task.id)} 
-            <li class:doing={task.status === 'doing'}>
-              {task.title}
-            </li>
-          {/each}
-        </ul>
-      {:else}
-        <p>not a task yet, get to work!</p>
-      {/if}
+  <header>
+    <h1>salieri</h1>
+    <div class="status-bar">
+      <span class="day-indicator">{$currentLogicalDay}</span>
+      <span class="task-count">{todoTasks.length} active • {doneTasks.length} done</span>
     </div>
-    <div class="center-panel">
-      <div class="active-task-display">
-        <h3>active task</h3>
-        <p>
-          {#if $tasks.find(t => t.status === 'doing')}
-            {#each $tasks as task (task.id)}
-              {#if task.status === 'doing'}
-                {task.title}
-              {/if}
-            {/each}
-          {:else}
-            no active task.
-          {/if}
-        </p>
+  </header>
+
+  <div class="workspace">
+    <!-- Focus Zone -->
+    <section class="focus-zone">
+      <div class="active-task-card">
+        <h2>focus</h2>
+        {#if activeTask}
+          <div class="task-active">
+            <div class="task-title">{activeTask.title}</div>
+            <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}s</div>
+          </div>
+        {:else}
+          <div class="task-idle">
+            <div class="prompt">ready to focus?</div>
+            <div class="hint">use /doing [task] to begin</div>
+          </div>
+        {/if}
       </div>
 
-      <div class="pomodoro-timer">
-        <h3>pomodoro</h3>
-        <p>{formatTime($remainingTime)}</p>
-        <p>state: {$timerState}</p>
-      </div>
-    </div>
-    <div class="right-pane">
-      {#if $showEditor}
-      <div class="codemirror_holder" bind:this={editorDiv}>
+      <div class="pomodoro-card">
+        <div class="timer-display">
+          <div class="timer-icon">{getTimerStateIcon($timerState)}</div>
+          <div class="timer-time">{formatTime($remainingTime)}</div>
+          <div class="timer-state">{$timerState.toLowerCase()}</div>
         </div>
-      {/if} 
-    </div>
-</div>
-  <div class="commandline-footer">
-    <input
-      type="text"
-      bind:value={commandInput}
-      placeholder="~welcome to salieri"
-      on:keydown={handleKeydown}
-    />
-    {#if commandOutput}
-      <p class="greeting-message">{commandOutput}</p>
+        <div class="timer-progress">
+          <div class="progress-bar" style="width: {getTimerProgress()}%"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Task Panel -->
+    <section class="task-panel">
+      <div class="task-section">
+        <h3>todo</h3>
+        <div class="task-list">
+          {#each todoTasks as task (task.id)}
+            <div class="task-item" class:active={task.status === 'doing'}>
+              <div class="task-dot"></div>
+              <span class="task-text">{task.title}</span>
+            </div>
+          {/each}
+          {#if todoTasks.length === 0}
+            <div class="empty-state">all clear</div>
+          {/if}
+        </div>
+      </div>
+
+      {#if doneTasks.length > 0}
+        <div class="task-section completed">
+          <h3>completed</h3>
+          <div class="task-list">
+            {#each doneTasks.slice(0, 5) as task (task.id)}
+              <div class="task-item done">
+                <div class="task-check">✓</div>
+                <span class="task-text">{task.title}</span>
+              </div>
+            {/each}
+          </div>
+        </div>
+      {/if}
+    </section>
+
+    <!-- Editor Panel -->
+    {#if $showEditor}
+      <section class="editor-panel">
+        <div class="editor-header">
+          <span>code</span>
+          <button class="close-btn" on:click={toggleEditor}>×</button>
+        </div>
+        <div class="editor-container" bind:this={editorDiv}></div>
+      </section>
     {/if}
   </div>
+
+  <!-- Command Line -->
+  <footer class="command-line">
+    {#if showCommands}
+      <div class="commands-help">
+        {#each commands as cmd}
+          <div class="command-item">
+            <code>{cmd.cmd}</code>
+            <span>{cmd.desc}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
+    
+    <div class="input-section">
+      <div class="prompt-symbol">$</div>
+      <input
+        type="text"
+        bind:value={commandInput}
+        placeholder="type a command or /? for help"
+        on:keydown={handleKeydown}
+        class="command-input"
+      />
+    </div>
+    
+    {#if commandOutput}
+      <div class="output">{commandOutput}</div>
+    {/if}
+  </footer>
 </main>
 
 <style>
   :global(html.dark) {
-    --bg: #000;
-    --fg: #fff;
-    --accent: lime;
-    --panel-border: #333; 
-    --red-panel-bg: #800000; 
-    --red-panel-fg: #fff;
-    --yellow-panel-bg: #808000; 
-    --yellow-panel-fg: #fff;
-  }
-  :global(html.light) {
-    --bg: #fff;
-    --fg: #000;
-    --accent: red;
-    --panel-border: #ccc; 
-    --red-panel-bg: #ffcccb;
-    --red-panel-fg: #000;
-    --yellow-panel-bg: #ffffcc; 
-    --yellow-panel-fg: #000;
+    --bg-primary: #0a0a0a;
+    --bg-secondary: #111111;
+    --bg-tertiary: #1a1a1a;
+    --fg-primary: #ffffff;
+    --fg-secondary: #b3b3b3;
+    --fg-muted: #666666;
+    --accent: #00ff41;
+    --accent-dim: #00cc33;
+    --accent-dark: #009926;
+    --border: #333333;
+    --error: #ff4444;
+    --warning: #ffaa00;
   }
 
-  :global(html),
-  :global(body) {
+  :global(html.light) {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f8f8;
+    --bg-tertiary: #eeeeee;
+    --fg-primary: #000000;
+    --fg-secondary: #4d4d4d;
+    --fg-muted: #999999;
+    --accent: #00aa33;
+    --accent-dim: #00cc33;
+    --accent-dark: #008822;
+    --border: #dddddd;
+    --error: #cc0000;
+    --warning: #cc8800;
+  }
+
+  :global(*) {
+    box-sizing: border-box;
+  }
+
+  :global(html), :global(body) {
     margin: 0;
     padding: 0;
-    height: 100%;
-    width: 100%;
-    background: var(--bg);
-    color: var(--fg);
-    font-family: sans-serif;
-    overflow-x: hidden; 
+    height: 100vh;
+    background: var(--bg-primary);
+    color: var(--fg-primary);
+    font-family: 'SF Mono', 'Monaco', 'Consolas', 'Liberation Mono', monospace;
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: hidden;
   }
 
   main {
     display: flex;
-    flex-direction: column; 
+    flex-direction: column;
     height: 100vh;
-    width: 100%;
-    box-sizing: border-box;
+    background: var(--bg-primary);
   }
 
-  h1 { /* header */
-    color: var(--accent);
-    text-transform: lowercase;
-    font-size: 3em; 
-    font-weight: 200;
-    text-align: center;
-    margin: 0.3em 0; 
-    flex-shrink: 0; 
-  }
-
-  .page-content {
+  header {
+    padding: 1rem 2rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
     display: flex;
-    flex-direction: row; 
-    flex-grow: 1; 
-    overflow-y: hidden; 
-    width: 100%;
-    box-sizing: border-box;
+    justify-content: space-between;
+    align-items: center;
   }
 
-  .left-panel.tasks-list-container {
-    flex-basis: 20%;
-    background-color: var(--red-panel-bg);
-    color: var(--red-panel-fg);
-    padding: 1em;
-    overflow-y: auto; 
-    box-sizing: border-box;
-    border-right: 1px solid var(--panel-border);
-  }
-  .left-panel.tasks-list-container h2 {
-    margin-top: 0;
-    font-size: 1.5em;
+  h1 {
+    font-size: 2rem;
+    font-weight: 200;
     color: var(--accent);
-  }
-  .left-panel.tasks-list-container ul {
-    list-style: none;
-    padding: 0;
-  }
-  .left-panel.tasks-list-container li {
-    padding: 0.3em 0.1em;
-    border-bottom: 1px solid color-mix(in srgb, var(--red-panel-fg) 20%, transparent);
-  }
-  .left-panel.tasks-list-container li:last-child {
-    border-bottom: none;
+    margin: 0;
+    letter-spacing: 2px;
+    text-transform: lowercase;
   }
 
+  .status-bar {
+    display: flex;
+    gap: 2rem;
+    font-size: 0.85rem;
+    color: var(--fg-secondary);
+  }
 
-  .center-panel {
-    flex-basis: 30%; 
-    padding: 1em;
+  .day-indicator {
+    color: var(--accent-dim);
+    font-weight: 500;
+  }
+
+  .workspace {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 1px;
+    background: var(--border);
+    overflow: hidden;
+  }
+
+  .workspace.with-editor {
+    grid-template-columns: 1fr 300px 1fr;
+  }
+
+  .focus-zone {
+    background: var(--bg-primary);
+    padding: 2rem;
     display: flex;
     flex-direction: column;
-    align-items: center; 
+    justify-content: center;
+    gap: 2rem;
+  }
+
+  .active-task-card, .pomodoro-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 2rem;
     text-align: center;
-    overflow-y: auto;
-    box-sizing: border-box;
-    border-right: 1px solid var(--panel-border);
   }
-  .center-panel h3 {
-    font-size: 1.2em;
+
+  .active-task-card h2 {
+    margin: 0 0 1rem;
+    font-size: 1.2rem;
+    font-weight: 400;
     color: var(--accent);
-    margin-top: 0.5em;
-    margin-bottom: 0.3em;
-  }
-  .active-task-display, .pomodoro-timer {
-    margin-bottom: 1em;
-  }
-  .active-task-display p, .pomodoro-timer p {
-    margin: 0.2em 0;
-    font-size: 0.9em;
+    text-transform: lowercase;
   }
 
-  .right-pane {
-    flex-basis: 50%;
-    width: 50%;
-    background-color: var(--yellow-panel-bg);
-    color: var(--yellow-panel-fg);
-    padding: 1em; 
-    box-sizing: border-box;
+  .task-active .task-title {
+    font-size: 1.5rem;
+    color: var(--fg-primary);
+    margin-bottom: 0.5rem;
+    font-weight: 300;
+  }
+
+  .task-active .task-timer {
+    color: var(--accent-dim);
+    font-size: 1rem;
+  }
+
+  .task-idle .prompt {
+    font-size: 1.2rem;
+    color: var(--fg-secondary);
+    margin-bottom: 0.5rem;
+  }
+
+  .task-idle .hint {
+    font-size: 0.9rem;
+    color: var(--fg-muted);
+  }
+
+  .timer-display {
+    margin-bottom: 1rem;
+  }
+
+  .timer-icon {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .timer-time {
+    font-size: 3rem;
+    font-weight: 200;
+    color: var(--accent);
+    margin-bottom: 0.25rem;
+    font-family: 'SF Mono', monospace;
+  }
+
+  .timer-state {
+    font-size: 0.9rem;
+    color: var(--fg-secondary);
+    text-transform: lowercase;
+  }
+
+  .timer-progress {
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    transition: width 1s ease;
+  }
+
+  .task-panel {
+    background: var(--bg-secondary);
+    padding: 2rem;
     overflow-y: auto;
+    border-left: 1px solid var(--border);
   }
 
-  .commandline-footer {
-    flex-shrink: 0; 
-    padding: 0.5em 0;
-    width: 100%;
-    box-sizing: border-box;
+  .task-section {
+    margin-bottom: 2rem;
   }
 
-  input[type='text'] {
-    padding: 0.8em;
+  .task-section h3 {
+    margin: 0 0 1rem;
+    font-size: 1rem;
+    font-weight: 400;
+    color: var(--accent);
+    text-transform: lowercase;
+  }
+
+  .task-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .task-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.75rem;
     border-radius: 4px;
-    border: 1px solid var(--fg);
-    background-color: var(--bg);
-    color: var(--fg);
-    font-size: 1em;
-    display: block;
-    margin: 0 auto 0.5em auto; 
-    width: 95%;
-    box-sizing: border-box;
-  }
-  input[type='text']:focus {
-    border-color: var(--accent);
-    outline: none;
-    color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent);
+    transition: background 0.15s ease;
   }
 
-  .greeting-message {
+  .task-item:hover {
+    background: var(--bg-tertiary);
+  }
+
+  .task-item.active {
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    border: 1px solid var(--accent-dark);
+  }
+
+  .task-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--fg-muted);
+    flex-shrink: 0;
+  }
+
+  .task-item.active .task-dot {
+    background: var(--accent);
+    box-shadow: 0 0 6px var(--accent);
+  }
+
+  .task-check {
+    color: var(--accent);
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  .task-text {
+    flex: 1;
+    font-size: 0.9rem;
+  }
+
+  .task-item.done .task-text {
+    color: var(--fg-muted);
+    text-decoration: line-through;
+  }
+
+  .empty-state {
+    color: var(--fg-muted);
+    font-style: italic;
     text-align: center;
-    font-weight: bold;
-    font-size: 1em; 
-    color: var(--accent);
-    padding: 0 0.5em 0.5em 0.5em; 
-    margin:0;
+    padding: 2rem 0;
   }
 
-  .doing { 
-    font-weight: bold;
-    color: var(--accent); 
+  .editor-panel {
+    background: var(--bg-primary);
+    border-left: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+  }
 
+  .editor-header {
+    padding: 1rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--bg-secondary);
+  }
+
+  .editor-header span {
+    color: var(--accent);
+    font-weight: 500;
+  }
+
+  .close-btn {
+    background: none;
+    border: none;
+    color: var(--fg-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .close-btn:hover {
+    color: var(--fg-primary);
+  }
+
+  .editor-container {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  :global(.cm-editor) {
+    height: 100%;
+    background: var(--bg-primary) !important;
+    color: var(--fg-primary) !important;
+  }
+
+  :global(.cm-focused) {
+    outline: none !important;
+  }
+
+  .command-line {
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    padding: 1rem 2rem;
+  }
+
+  .commands-help {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  .command-item {
+    display: flex;
+    gap: 1rem;
+    padding: 0.25rem 0;
+    font-size: 0.85rem;
+  }
+
+  .command-item code {
+    color: var(--accent);
+    background: var(--bg-secondary);
+    padding: 0.125rem 0.25rem;
+    border-radius: 2px;
+    min-width: 120px;
+  }
+
+  .command-item span {
+    color: var(--fg-secondary);
+  }
+
+  .input-section {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .prompt-symbol {
+    color: var(--accent);
+    font-weight: bold;
+  }
+
+  .command-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: var(--fg-primary);
+    font-family: inherit;
+    font-size: inherit;
+    outline: none;
+  }
+
+  .command-input::placeholder {
+    color: var(--fg-muted);
+  }
+
+  .output {
+    margin-top: 0.5rem;
+    color: var(--accent-dim);
+    font-size: 0.9rem;
+  }
+
+  @media (max-width: 1200px) {
+    .workspace {
+      grid-template-columns: 1fr;
+    }
+    
+    .task-panel {
+      border-left: none;
+      border-top: 1px solid var(--border);
+    }
   }
 </style>
