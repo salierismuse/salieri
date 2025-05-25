@@ -45,8 +45,8 @@ pub struct PomodoroTimer {
 
 impl PomodoroTimer {
     pub fn new(app_handle: AppHandle) -> Self {
-        let work_secs = 5; 
-        let short_break_secs = 5; 
+        let work_secs = 60 * 25; 
+        let short_break_secs = 60 * 25; 
         let long_break_secs = 15 * 60; 
         let interval_time = 1;
 

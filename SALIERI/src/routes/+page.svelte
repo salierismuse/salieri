@@ -25,6 +25,7 @@
   const showEditor = writable(false);
   let myView: EditorView | null = null;
   let showCommands = false;
+  let working_code_doc;
 
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
@@ -39,6 +40,10 @@
     { cmd: '/code', desc: 'toggle code editor' },
     { cmd: '/theme [dark|light|toggle]', desc: 'change theme' }
   ];
+
+  async function readFile(path: string): Promise<string> {
+    return await invoke<string>('command_code', { path });
+}
 
   onMount(async () => {
     try {
@@ -86,11 +91,6 @@
       return;
     }
 
-    if (cmd === '/code') {
-      toggleEditor();
-      return;
-    }
-
     try {
       commandOutput = await invoke('handle_palette_command', { command: cmd });
     } catch (e) {
@@ -98,6 +98,11 @@
     }
 
     const dayToLoad = $currentLogicalDay || new Date().toLocaleDateString('en-CA');
+
+      if (cmd.startsWith('/code')) {
+        toggleEditor(commandOutput);
+      return;
+    }
 
     // timer commands
     if (cmd === '/start') await invoke('start_timer');
@@ -109,6 +114,9 @@
     else if (cmd.startsWith('/completed')) done = true;
 
     await load_tasks_for_day(dayToLoad, done);
+
+
+
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -129,26 +137,33 @@
     }
   }
 
-  async function toggleEditor() {
+  async function toggleEditor(pathToLoad: string | null = null) {
     const next = !get(showEditor);
     showEditor.set(next);
 
     if (next) {
       await tick();
-      mountEditor();
+      await mountEditor(pathToLoad ?? '~');  
     } else {
       myView?.destroy();
       myView = null;
     }
   }
 
-  function mountEditor() {
+  async function mountEditor(filePath: string) {
     if (!editorDiv) return;
 
     myView?.destroy();
 
+    let fileContent = '';
+    try {
+      fileContent = filePath; 
+    } catch(e) {
+      fileContent = "error";
+    }
+
     const state = EditorState.create({
-      doc: '// focus mode activated\n// let the code flow...\n\n',
+      doc: fileContent,
       extensions: [basicSetup]
     });
 
