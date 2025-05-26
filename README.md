@@ -3,4 +3,4 @@ salieri is a fullscreen, keyboard-first, local-only productivity environment for
 take notes, do your homework, program the next big thing. read your lecture notes, catch up on those papers you've been putting off. you don't need adobe, word, and vscode. you just need salieri. 
 
 DEMO:
-![image](https://github.com/user-attachments/assets/b3987029-35d5-468d-bfea-95302936dc44)
+![image](https://github.com/user-attachments/assets/3b58e806-d4c9-4f10-82dd-8e3328df306a)
