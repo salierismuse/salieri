@@ -11,6 +11,7 @@ use crate::theme::{set_theme, get_current_theme, ThemeChangedPayload, THEME_KEY,
 use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup, get_current_logical_day_key};
 use crate::pomodoro::init_pomodoro;
 use crate::commands::handle_palette_command;
+use crate::fileaccess::save_file;
 
 use serde_json::json;
 use tauri_plugin_store::StoreExt;
@@ -58,7 +59,8 @@ fn main() {
             get_current_theme,
             handle_palette_command,
             get_tasks
-            ,get_current_logical_day_key
+            ,get_current_logical_day_key,
+            save_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

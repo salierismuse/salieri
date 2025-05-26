@@ -7,6 +7,7 @@ export type Task = {
   title: string;
   created_at: string;
   status: string;
+  time_spent: number; 
 };
 
 export const tasks = writable<Task[]>([]);

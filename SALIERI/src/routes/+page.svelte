@@ -26,6 +26,7 @@
   let myView: EditorView | null = null;
   let showCommands = false;
   let working_code_doc;
+  let currFile = '';
 
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
@@ -38,12 +39,13 @@
     { cmd: '/resume', desc: 'resume timer' },
     { cmd: '/stop', desc: 'stop timer' },
     { cmd: '/code', desc: 'toggle code editor' },
+    { cmd: '/wq', desc: 'save and exit your work'},
     { cmd: '/theme [dark|light|toggle]', desc: 'change theme' }
   ];
 
-  async function readFile(path: string): Promise<string> {
-    return await invoke<string>('command_code', { path });
-}
+//   async function readFile(path: string): Promise<string> {
+//     return await invoke<string>('command_code', { path });
+// }
 
   onMount(async () => {
     try {
@@ -99,8 +101,41 @@
 
     const dayToLoad = $currentLogicalDay || new Date().toLocaleDateString('en-CA');
 
-      if (cmd.startsWith('/code')) {
-        toggleEditor(commandOutput);
+    if (cmd.startsWith('/wq')) {
+      // for when we add "save as"
+      //  currFile = cmd.slice(3);
+
+      // general function
+      if (myView) {
+        if (!currFile) {
+          commandOutput = 'error: no file is open';
+          return;
+        }
+        const currentValue = myView.state.doc.toString();
+        try {
+          await invoke('save_file', { userPath: currFile, information: currentValue });
+        } catch (e) {
+          commandOutput = `error saving: ${e}`;
+          return;
+        }
+
+        toggleEditor(null);
+
+
+      }
+      else {
+        Error("file not open");
+      }
+      return;
+    }
+
+    if (cmd.startsWith('/code')) {
+
+      // set current file and then call being editor functions. 
+
+      const parts = cmd.split(' ');
+      currFile = parts.slice(1).join(' ').trim();
+      toggleEditor(commandOutput);
       return;
     }
 
@@ -200,6 +235,18 @@
   $: todoTasks = $tasks.filter(t => t.status === 'todo');
   $: doneTasks = $tasks.filter(t => t.status === 'done');
 
+  // Update active task time when timer ticks
+  $: if ($timerState === 'Running' && activeTask) {
+    tasks.update(tasks => {
+      return tasks.map(task => {
+        if (task.id === activeTask.id) {
+          return { ...task, time_spent: task.time_spent + 1 };
+        }
+        return task;
+      });
+    });
+  }
+
   $: { 
     if (typeof document !== 'undefined' && document.documentElement) {
       const root = document.documentElement.classList;
@@ -234,7 +281,7 @@
         {#if activeTask}
           <div class="task-active">
             <div class="task-title">{activeTask.title}</div>
-            <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}s</div>
+            <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}</div>
           </div>
         {:else}
           <div class="task-idle">
@@ -293,7 +340,7 @@
       <section class="editor-panel">
         <div class="editor-header">
           <span>code</span>
-          <button class="close-btn" on:click={toggleEditor}>×</button>
+         <!---- <button class="close-btn" on:click={toggleEditor}>×</button> -->
         </div>
         <div class="editor-container" bind:this={editorDiv}></div>
       </section>
