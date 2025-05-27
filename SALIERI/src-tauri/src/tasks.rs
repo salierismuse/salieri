@@ -65,6 +65,9 @@ pub struct Task {
 
 #[derive(Clone, Serialize, Deserialize, Default)]
 struct DayBucket {
+    // perhaps make the hash store a vector of a tuple
+    // containing taskid and task
+    // perhaps consistent "number" store as well
     todo: HashMap<TaskId, Task>,
     done: HashMap<TaskId, Task>,
 }
