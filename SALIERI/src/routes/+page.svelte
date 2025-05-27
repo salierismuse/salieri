@@ -130,6 +130,8 @@
 
 
       if (cmd.startsWith('/write')) {
+      const parts = cmd.split(' ');
+      currFile = parts.slice(1).join(' ').trim();
       tiptapBool = true;  
       await tick();
       toggleWriter(commandOutput as string);
@@ -156,10 +158,14 @@
           commandOutput = `error saving: ${e}`;
           return;
         }
-
         toggleEditor(null);
+      }
 
-
+      else if (tiptapBool) {
+        const content = editor.getHTML();
+        await invoke('save_file', { userPath: currFile, information: content});
+        await tick();
+        tiptapBool = false;
       }
       else {
         Error("file not open");
