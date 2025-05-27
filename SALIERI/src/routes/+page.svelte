@@ -10,6 +10,19 @@
   import { EditorState } from '@codemirror/state';
   import { get } from 'svelte/store';
   import { tick } from 'svelte';
+  import { javascript } from '@codemirror/lang-javascript'
+  import { oneDark } from '@codemirror/theme-one-dark'
+  import { indentWithTab } from '@codemirror/commands'
+  import { linter, lintGutter } from '@codemirror/lint'
+  import { acceptCompletion, autocompletion } from '@codemirror/autocomplete'
+  import { indentMore } from '@codemirror/commands'
+  import { indentLess } from '@codemirror/commands'
+  import { markdown } from "@codemirror/lang-markdown";
+ // import Tiptap from '$lib/TipTap.svelte'
+  import { Editor } from '@tiptap/core'
+  import StarterKit from '@tiptap/starter-kit'
+
+
 
   export const theme = writable<'light' | 'dark'>('dark');
   export const timerState = writable<'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak'>('Idle');
@@ -27,6 +40,10 @@
   let showCommands = false;
   let working_code_doc;
   let currFile = '';
+  let elementTip;
+  let element: HTMLElement;
+  let editor: Editor;
+  let tiptapBool = false;
 
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
@@ -40,12 +57,9 @@
     { cmd: '/stop', desc: 'stop timer' },
     { cmd: '/code', desc: 'toggle code editor' },
     { cmd: '/wq', desc: 'save and exit your work'},
+    { cmd: '/write', desc: 'take notes, or write the next american novel'},
     { cmd: '/theme [dark|light|toggle]', desc: 'change theme' }
   ];
-
-//   async function readFile(path: string): Promise<string> {
-//     return await invoke<string>('command_code', { path });
-// }
 
   onMount(async () => {
     try {
@@ -80,7 +94,20 @@
   onDestroy(() => {
     unlistenTheme?.();
     unlistenTimer?.();
+    if (editor) {
+    editor.destroy()
+    }
   });
+
+  async function toggleWriter(content: string) {
+      editor = new Editor({
+      element: element,
+      extensions: [
+         StarterKit,
+      ],
+      content: content,
+      })
+  }
 
   async function submitCommand() {
     if (commandInput.trim() === '') return;
@@ -93,10 +120,21 @@
       return;
     }
 
+
+
     try {
       commandOutput = await invoke('handle_palette_command', { command: cmd });
     } catch (e) {
       commandOutput = `error: ${e}`;
+    }
+
+
+      if (cmd.startsWith('/write')) {
+      tiptapBool = true;  
+      await tick();
+      toggleWriter(commandOutput as string);
+
+      return;
     }
 
     const dayToLoad = $currentLogicalDay || new Date().toLocaleDateString('en-CA');
@@ -132,10 +170,10 @@
     if (cmd.startsWith('/code')) {
 
       // set current file and then call being editor functions. 
-
       const parts = cmd.split(' ');
       currFile = parts.slice(1).join(' ').trim();
       toggleEditor(commandOutput);
+      commandOutput = "opened successfully";
       return;
     }
 
@@ -149,9 +187,6 @@
     else if (cmd.startsWith('/completed')) done = true;
 
     await load_tasks_for_day(dayToLoad, done);
-
-
-
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -197,15 +232,40 @@
       fileContent = "error";
     }
 
+    const tabKeymap = keymap.of([
+    {
+      key: 'Tab',
+      preventDefault: true,
+      run: (view) => {
+        // check for autocompletion first
+        if (acceptCompletion(view)) return true;
+        // then handle indentation
+        return indentMore(view);
+      }
+    },
+    {
+      key: 'Shift-Tab',
+      preventDefault: true, 
+      run: (view) => {
+        // handle shift-tab for unindent
+        return indentLess(view);
+      }
+    }
+  ]);
+    let codeType;
     const state = EditorState.create({
       doc: fileContent,
-      extensions: [basicSetup]
+      extensions: [basicSetup,
+       markdown(), 
+       oneDark, 
+       autocompletion(), tabKeymap,]
     });
 
     myView = new EditorView({
       state,
-      parent: editorDiv
+      parent: editorDiv,
     });
+    myView.focus();
   }
 
   function formatTime(totalSeconds: number): string {
@@ -334,6 +394,12 @@
         </div>
       {/if}
     </section>
+
+  
+    {#if tiptapBool}
+      <div bind:this={element}>
+      </div>
+    {/if}
 
     <!-- Editor Panel -->
     {#if $showEditor}

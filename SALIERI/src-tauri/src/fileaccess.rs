@@ -39,9 +39,6 @@ pub async fn command_code(path: &[&str], _app: AppHandle) -> Result<String, Stri
     process_file(real_path)
 }
 
-// note, make it so the /wq command can take another command
-// that allows the user to write a new file
-// the doesn't exist already
 #[tauri::command]
 pub async fn save_file(user_path: String, information: String) -> Result<String, String> {
     let actual_path = expand_tilde(&user_path)?;

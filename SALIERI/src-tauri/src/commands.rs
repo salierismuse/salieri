@@ -68,6 +68,7 @@ pub async fn handle_palette_command(command: String, app_handle: AppHandle) -> R
         Some(&"/resume") => command_resume_pomodoro().await,
         Some(&"/stop") => command_stop_pomodoro().await,
         Some(&"/code") => command_code(&parts, app_handle).await,
+        Some(&"/write") => command_code(&parts, app_handle).await,
         Some(&"/wq") => command_wq(),
         Some(unknown_cmd) => Err(format!("unknown command: {}", unknown_cmd)),
         None => Err("empty command received".into()), 
