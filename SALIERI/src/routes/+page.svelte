@@ -34,6 +34,7 @@
   let commandOutput = '';
   let done = false; 
   let currentLogicalDay = writable('');
+  let currentTaskDayDisplay = writable('');
   let editorDiv: HTMLDivElement;
   const showEditor = writable(false);
   let myView: EditorView | null = null;
@@ -44,6 +45,7 @@
   let element: HTMLElement;
   let editor: Editor;
   let tiptapBool = false;
+  let currentDayOffset = 0;
 
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
@@ -68,6 +70,7 @@
 
       const logicalDayKey = await invoke<string>('get_current_logical_day_key');
       currentLogicalDay.set(logicalDayKey);
+      currentTaskDayDisplay = currentLogicalDay;
       await load_tasks_for_day(logicalDayKey, done); 
 
       document.documentElement.classList.remove('light', 'dark');
@@ -99,6 +102,31 @@
     }
   });
 
+  // task handling
+async function handlePrev() {
+  currentDayOffset += 1;
+  console.log('handlePrev called, currentDayOffset is now', currentDayOffset);
+
+  // must be exactly "days_offset"
+const payload = { days_offset: currentDayOffset };
+console.log('calling get_current_logical_day_key with payload:', JSON.stringify(payload));
+  const currentTaskDayDisplayKey = await invoke<string>(
+    'get_current_logical_day_key',
+    { daysOffset: currentDayOffset }
+  );
+  console.log('get_current_logical_day_key returned:', currentTaskDayDisplayKey);
+
+  const newTasks = await invoke<Task[]>('get_tasks', {
+    day: currentTaskDayDisplayKey,
+    done,
+    days_offset: currentDayOffset
+  });
+  console.log('get_tasks returned:', newTasks);
+
+  tasks.set(newTasks);
+  console.log('Tasks after loading:', get(tasks));
+}
+
   async function toggleWriter(content: string) {
       editor = new Editor({
       element: element,
@@ -123,7 +151,7 @@
 
 
     try {
-      commandOutput = await invoke('handle_palette_command', { command: cmd });
+      commandOutput = await invoke('handle_palette_command', { command: cmd, days_offset: currentDayOffset });
     } catch (e) {
       commandOutput = `error: ${e}`;
     }
@@ -206,7 +234,7 @@
 
   async function load_tasks_for_day(day: string, taskDoneStatus = false) {
     try {
-      const list = await invoke<Task[]>('get_tasks', { day, done: taskDoneStatus });
+      const list = await invoke<Task[]>('get_tasks', { day, done: taskDoneStatus, days_offset: currentDayOffset });
       tasks.set(list);
     } catch (e) {
       console.error('failed loading tasks:', e);
@@ -262,7 +290,7 @@
     const state = EditorState.create({
       doc: fileContent,
       extensions: [basicSetup,
-       markdown(), 
+       javascript(),
        oneDark, 
        autocompletion(), tabKeymap,]
     });
@@ -328,6 +356,9 @@
       }
     }
   }
+
+
+
 </script>
 
 <main>
@@ -374,14 +405,16 @@
       <div class="task-section">
         <h3>todo</h3>
         <div class="task-list">
-          {#each todoTasks as task (task.id)}
-            <div class="task-item" class:active={task.status === 'doing'}>
-              <div class="task-dot"></div>
-              <span class="task-text">{task.title}</span>
-            </div>
-          {/each}
+          <button on:click={handlePrev}>prev</button>
           {#if todoTasks.length === 0}
             <div class="empty-state">all clear</div>
+          {:else}
+            {#each todoTasks as task (task.id)}
+              <div class="task-item" class:active={task.status === 'doing'}>
+                <div class="task-dot"></div>
+                <span class="task-text">{task.title}</span>
+              </div>
+            {/each}
           {/if}
         </div>
       </div>

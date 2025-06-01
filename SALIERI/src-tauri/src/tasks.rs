@@ -34,11 +34,16 @@ lazy_static! {
 
 
 #[tauri::command]
-pub fn get_current_logical_day_key() -> String {
-    today_key() // Uses your existing -4 hours logic
+pub fn get_current_logical_day_key(days_offset: Option<i64>) -> String {
+    println!("[rust] received days_offset: {:?}", days_offset);
+    let offset = days_offset.unwrap_or(0);
+    println!("{}", offset);
+    today_key(offset)
 }
 
+
 async fn persist_global_store() -> Result<(), String> {
+
     let store_guard = TASK_STORE.lock().await;
     let store_data_to_save = store_guard.clone(); 
     drop(store_guard); 
@@ -72,8 +77,10 @@ struct DayBucket {
 type Store = HashMap<LogicalDay, DayBucket>;
 
 
-fn today_key() -> LogicalDay {
-    (Local::now() - ChronoDuration::hours(4)).format("%Y-%m-%d").to_string()
+fn today_key(days_offset: i64) -> LogicalDay {
+    (Local::now() - ChronoDuration::hours(4) - ChronoDuration::days(days_offset))
+        .format("%Y-%m-%d")
+        .to_string()
 }
 
 fn data_dir() -> PathBuf {
@@ -115,7 +122,7 @@ fn bucket_mut<'a>(st: &'a mut Store, day: &LogicalDay) -> &'a mut DayBucket {
 // ─── startup fix 
 pub async fn clear_active_startup(_h: AppHandle) -> Result<(), String> { 
     let mut store_guard = TASK_STORE.lock().await;
-    if let Some(bucket) = store_guard.get_mut(&today_key()) {
+    if let Some(bucket) = store_guard.get_mut(&today_key(0)) {
         for t in bucket.todo.values_mut() {
             if t.status == "doing" { t.status = "todo".into(); }
         }
@@ -157,7 +164,7 @@ pub fn start_task_timer_loop(_h: AppHandle) {
             let Some(id) = active_id_opt else { continue }; 
 
             let mut store_guard = TASK_STORE.lock().await;
-            let today = today_key();
+            let today = today_key(0);
             let mut changed_in_loop = false;
             if let Some(bucket) = store_guard.get_mut(&today) {
                 if let Some(task) = bucket.todo.get_mut(&id) {
@@ -183,7 +190,6 @@ pub fn start_task_timer_loop(_h: AppHandle) {
 #[tauri::command]
 pub async fn get_tasks(_h: AppHandle, day: String, done: bool) -> Result<Vec<Task>, String> { 
     let store_guard = TASK_STORE.lock().await; 
-
     let bucket = store_guard.get(&day).cloned().unwrap_or_default();
     Ok(if done { bucket.done } else { bucket.todo }
         .into_values()
@@ -194,13 +200,13 @@ pub async fn get_tasks(_h: AppHandle, day: String, done: bool) -> Result<Vec<Tas
 macro_rules! ensure_title { ($p:expr) => { if $p.len() < 2 { return Err("need task title".into()); } }; }
 
 // ─── /todo 
-pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+pub async fn command_todo(parts: &[&str], _app: AppHandle, days_offset: Option<i64> ) -> Result<String, String> {
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
     let mut store_guard = TASK_STORE.lock().await; 
-
-    let day = today_key();
+    let offset = days_offset.unwrap_or(0);
+    let day = today_key(offset);
     let bucket = bucket_mut(&mut *store_guard, &day); 
 
     if bucket.todo.values().any(|t| t.title == title) || bucket.done.values().any(|t| t.title == title) {
@@ -222,12 +228,13 @@ pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, Str
 }
 
 // ─── /doing
-pub async fn command_doing(parts: &[&str], _app: AppHandle) -> Result<String, String> {
+pub async fn command_doing(parts: &[&str], _app: AppHandle, days_offset: Option<i64>) -> Result<String, String> {
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
     let mut store_guard = TASK_STORE.lock().await;
-    let day = today_key();
+    let offset = days_offset.unwrap_or(0);
+    let day = today_key(offset);
     let bucket = bucket_mut(&mut *store_guard, &day);
 
     let old_id_opt = ACTIVE_TASK_ID.read().await.clone();
@@ -273,12 +280,12 @@ pub async fn command_doing(parts: &[&str], _app: AppHandle) -> Result<String, St
 
 
 // ─── /done 
-pub async fn command_done(parts: &[&str], h: AppHandle) -> Result<String, String> { 
+pub async fn command_done(parts: &[&str], h: AppHandle, days_offset: Option<i64>) -> Result<String, String> { 
     ensure_title!(parts);
     let title = parts[1..].join(" ");
-
+    let offset = days_offset.unwrap_or(0);
     let mut store_guard = TASK_STORE.lock().await; 
-    let day = today_key();
+    let day = today_key(offset);
     let bucket = bucket_mut(&mut *store_guard, &day); 
 
     let task_id_opt = bucket.todo.iter()
@@ -310,12 +317,13 @@ pub async fn command_done(parts: &[&str], h: AppHandle) -> Result<String, String
 }
 
 // ─── /break 
+// add offset logic
 pub async fn command_break(parts: &[&str], _app: AppHandle) -> Result<String, String> { 
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
     let mut store_guard = TASK_STORE.lock().await;
-    let day = today_key();
+    let day = today_key(0);
     let bucket = bucket_mut(&mut *store_guard, &day); 
 
     if let Some(task) = bucket.todo.values_mut().find(|t| t.title == title) {
@@ -338,12 +346,13 @@ pub async fn command_break(parts: &[&str], _app: AppHandle) -> Result<String, St
 }
 
 // ─── /deleteT 
+// add offset stuff
 pub async fn command_deleteT(parts: &[&str], _app: AppHandle) -> Result<String, String> { 
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
     let mut store_guard = TASK_STORE.lock().await; 
-    let day = today_key();
+    let day = today_key(0);
     let bucket = bucket_mut(&mut *store_guard, &day);
 
     let task_id_opt = bucket.todo.iter()

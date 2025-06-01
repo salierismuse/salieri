@@ -49,7 +49,7 @@ fn command_wq() -> Result<String, String>
 }
 
 #[tauri::command]
-pub async fn handle_palette_command(command: String, app_handle: AppHandle) -> Result<String, String> {
+pub async fn handle_palette_command(command: String, app_handle: AppHandle, days_offset: Option<i64>) -> Result<String, String> {
     let trimmed_command = command.trim();
     let parts: Vec<&str> = trimmed_command.split_whitespace().collect();
 
@@ -57,9 +57,9 @@ pub async fn handle_palette_command(command: String, app_handle: AppHandle) -> R
         Some(&"ping") => command_ping(),
         Some(&"date") => command_date(),
         Some(&"/theme") => command_theme(&parts, app_handle).await,
-        Some(&"/todo") => command_todo(&parts, app_handle).await,
-        Some(&"/doing") => command_doing(&parts, app_handle).await,
-        Some(&"/done") => command_done(&parts, app_handle).await,
+        Some(&"/todo") => command_todo(&parts, app_handle, days_offset).await,
+        Some(&"/doing") => command_doing(&parts, app_handle, days_offset).await,
+        Some(&"/done") => command_done(&parts, app_handle, days_offset).await,
         Some(&"/break") => command_break(&parts, app_handle).await,
         Some(&"/deleteT") => command_deleteT(&parts, app_handle).await,
         Some(&"/completed") => command_completed(), 
