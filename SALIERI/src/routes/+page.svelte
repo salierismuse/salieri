@@ -240,6 +240,13 @@ const payload = { days_offset: currentDayOffset };
       done = false;
       currentDayOffset = 0;
     }
+    if (cmd.startsWith('/nextDay')) {
+      handleNext();
+    }
+    if (cmd.startsWith('/prevDay'))
+    {
+      handlePrev();
+    }
     else if (cmd.startsWith('/completed')) done = true;
 
     await load_tasks_for_day(dayToLoad, done);

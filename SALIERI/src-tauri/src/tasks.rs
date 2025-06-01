@@ -9,6 +9,7 @@ use futures::executor;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use tokio::sync::Mutex as TokioMutex;
 use lazy_static::lazy_static;
+use indexmap::IndexMap;
 
 use crate::user::increment_tasks_done;
 
@@ -90,11 +91,11 @@ struct DayBucket {
     // perhaps make the hash store a vector of a tuple
     // containing taskid and task
     // perhaps consistent "number" store as well
-    todo: HashMap<TaskId, Task>,
-    done: HashMap<TaskId, Task>,
+    todo: IndexMap<TaskId, Task>,
+    done: IndexMap<TaskId, Task>,
 }
 
-type Store = HashMap<LogicalDay, DayBucket>;
+type Store = IndexMap<LogicalDay, DayBucket>;
 
 
 fn today_key(days_offset: i64) -> LogicalDay {
@@ -320,7 +321,7 @@ pub async fn command_done(parts: &[&str], h: AppHandle, days_offset: Option<i64>
         Some(id) => id,
         None => return Err("task not found".into()),
     };
-    if let Some(mut task) = bucket.todo.remove(&task_id) {
+    if let Some(mut task) = bucket.todo.shift_remove(&task_id) {
         task.status = "done".into();
         bucket.done.insert(task_id.clone(), task);
 
