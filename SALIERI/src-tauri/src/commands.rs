@@ -57,7 +57,7 @@ pub async fn handle_palette_command(command: String, app_handle: AppHandle, days
         Some(&"ping") => command_ping(),
         Some(&"date") => command_date(),
         Some(&"/theme") => command_theme(&parts, app_handle).await,
-        Some(&"/todo") => command_todo(&parts, app_handle, days_offset).await,
+        Some(&"/todo") => command_todo(&parts, app_handle).await,
         Some(&"/doing") => command_doing(&parts, app_handle, days_offset).await,
         Some(&"/done") => command_done(&parts, app_handle, days_offset).await,
         Some(&"/break") => command_break(&parts, app_handle).await,

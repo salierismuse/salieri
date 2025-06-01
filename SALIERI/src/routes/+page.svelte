@@ -127,6 +127,24 @@ console.log('calling get_current_logical_day_key with payload:', JSON.stringify(
   console.log('Tasks after loading:', get(tasks));
 }
 
+async function handleNext() {
+  currentDayOffset -= 1;
+
+const payload = { days_offset: currentDayOffset };
+  const currentTaskDayDisplayKey = await invoke<string>(
+    'get_current_logical_day_key',
+    { daysOffset: currentDayOffset }
+  );
+
+  const newTasks = await invoke<Task[]>('get_tasks', {
+    day: currentTaskDayDisplayKey,
+    done,
+    days_offset: currentDayOffset
+  });
+
+  tasks.set(newTasks);
+}
+
   async function toggleWriter(content: string) {
       editor = new Editor({
       element: element,
@@ -217,7 +235,11 @@ console.log('calling get_current_logical_day_key with payload:', JSON.stringify(
     else if (cmd === '/stop') await invoke('stop_timer');
 
     // task filter state update
-    if (cmd.startsWith('/todo')) done = false;
+    if (cmd.startsWith('/todo')) 
+    {
+      done = false;
+      currentDayOffset = 0;
+    }
     else if (cmd.startsWith('/completed')) done = true;
 
     await load_tasks_for_day(dayToLoad, done);
@@ -416,6 +438,7 @@ console.log('calling get_current_logical_day_key with payload:', JSON.stringify(
               </div>
             {/each}
           {/if}
+        <button on:click={handleNext}>next</button>
         </div>
       </div>
 

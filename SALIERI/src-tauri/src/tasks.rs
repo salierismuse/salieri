@@ -1,4 +1,4 @@
-use chrono::{Local, Duration as ChronoDuration};
+use chrono::{Local, Duration as ChronoDuration, NaiveDate};
 use tauri::AppHandle;
 use uuid::Uuid;
 use once_cell::sync::Lazy;
@@ -32,12 +32,29 @@ lazy_static! {
     static ref ACTIVE_TASK:    TokioMutex<Option<Task>>    = TokioMutex::new(None);
 }
 
+// helper for command_todo
+fn try_parse_date(input: &str) -> Option<String> {
+    let formats = [
+        "%m/%d/%Y",    // 06/01/2025
+        "%m/%d/%y",    // 06/01/25
+        "%Y-%m-%d",    // 2025-06-01 
+        "%m-%d-%Y",    // 06-01-2025
+        "%m-%d-%y",    // 06-01-25
+    ];
+    
+    for format in &formats {
+        if let Ok(date) = NaiveDate::parse_from_str(input, format) {
+            return Some(date.format("%Y-%m-%d").to_string());
+        }
+    }
+    
+    None
+}
+
 
 #[tauri::command]
 pub fn get_current_logical_day_key(days_offset: Option<i64>) -> String {
-    println!("[rust] received days_offset: {:?}", days_offset);
     let offset = days_offset.unwrap_or(0);
-    println!("{}", offset);
     today_key(offset)
 }
 
@@ -203,13 +220,17 @@ pub async fn get_tasks(_h: AppHandle, day: String, done: bool) -> Result<Vec<Tas
 macro_rules! ensure_title { ($p:expr) => { if $p.len() < 2 { return Err("need task title".into()); } }; }
 
 // ─── /todo 
-pub async fn command_todo(parts: &[&str], _app: AppHandle, days_offset: Option<i64> ) -> Result<String, String> {
+pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, String> {
     ensure_title!(parts);
-    let title = parts[1..].join(" ");
-
+    let mut title = parts[1..].join(" ");
+    let mut day = today_key(0);
+    if parts.len() > 1 {
+        if let Some(parsed_date) = try_parse_date(parts[1]) {
+            day = parsed_date;
+            title = parts[2..].join(" ");
+        }
+    }
     let mut store_guard = TASK_STORE.lock().await; 
-    let offset = days_offset.unwrap_or(0);
-    let day = today_key(offset);
     let bucket = bucket_mut(&mut *store_guard, &day); 
 
     if bucket.todo.values().any(|t| t.title == title) || bucket.done.values().any(|t| t.title == title) {
