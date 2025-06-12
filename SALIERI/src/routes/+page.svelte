@@ -480,12 +480,16 @@ const payload = { days_offset: currentDayOffset };
       <div class="states-section">
         <h3>states</h3>
         <div class="state-list">
-          {#each $states as st}
-            <div class="state-item">
-              <span>{st.name}</span>
-              <span>{Math.floor(st.total_time.secs / 60)}m</span>
-            </div>
-          {/each}
+          {#if $states.length === 0}
+            <div class="empty-state">no states yet</div>
+          {:else}
+            {#each $states as st}
+              <div class="state-item">
+                <span>{st.name}</span>
+                <span>{Math.floor(st.total_time.secs / 60)}m</span>
+              </div>
+            {/each}
+          {/if}
         </div>
       </div>
 
