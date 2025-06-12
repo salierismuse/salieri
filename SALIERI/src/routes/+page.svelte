@@ -52,7 +52,7 @@
     { cmd: '/doing [task]', desc: 'start working on task' },
     { cmd: '/done [task]', desc: 'mark task complete' },
     { cmd: '/break [task]', desc: 'pause current task' },
-    { cmd: '/deleteT [task]', desc: 'delete task' },
+    { cmd: '/delete [task]', desc: 'delete task' },
     { cmd: '/start', desc: 'begin pomodoro' },
     { cmd: '/pause', desc: 'pause timer' },
     { cmd: '/resume', desc: 'resume timer' },
@@ -434,7 +434,6 @@ const payload = { days_offset: currentDayOffset };
       <div class="task-section">
         <h3>todo</h3>
         <div class="task-list">
-          <button on:click={handlePrev}>prev</button>
           {#if todoTasks.length === 0}
             <div class="empty-state">all clear</div>
           {:else}
@@ -445,7 +444,6 @@ const payload = { days_offset: currentDayOffset };
               </div>
             {/each}
           {/if}
-        <button on:click={handleNext}>next</button>
         </div>
       </div>
 

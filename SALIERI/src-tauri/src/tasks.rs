@@ -370,9 +370,9 @@ pub async fn command_break(parts: &[&str], _app: AppHandle) -> Result<String, St
     }
 }
 
-// ─── /deleteT 
+// ─── /delete
 // add offset stuff
-pub async fn command_deleteT(parts: &[&str], _app: AppHandle) -> Result<String, String> { 
+pub async fn command_delete(parts: &[&str], _app: AppHandle) -> Result<String, String> {
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
