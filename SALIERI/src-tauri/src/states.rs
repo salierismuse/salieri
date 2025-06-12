@@ -1,4 +1,5 @@
-use std::{collections::HashMap, fs, path::{Path, PathBuf}, time::Duration};
+use std::{fs, path::{Path, PathBuf}, time::Duration};
+use indexmap::IndexMap;
 use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use uuid::Uuid;
 use lazy_static::lazy_static;
@@ -12,13 +13,13 @@ pub struct State {
     pub total_time: Duration,
 }
 
-type StateStore = HashMap<Uuid, State>;
+type StateStore = IndexMap<Uuid, State>;
 
 fn load_store_for_static_init() -> StateStore {
     match load_json(&store_path()) {
         Ok(store) => store,
         Err(_) => {
-            let empty: StateStore = HashMap::new();
+            let empty: StateStore = IndexMap::new();
             let _ = save_json(&store_path(), &empty);
             empty
         }
@@ -117,6 +118,11 @@ pub async fn persist_states() -> Result<(), String> { persist_state_store().awai
 pub async fn get_state_by_name(name: &str) -> Option<State> {
     let guard = STATE_STORE.lock().await;
     guard.values().find(|s| s.name == name).cloned()
+}
+
+pub async fn delete_state_by_name(name: &str) -> Result<String, String> {
+    let Some(st) = get_state_by_name(name).await else { return Err("state not found".into()); };
+    delete_state(st.id.to_string()).await
 }
 
 pub async fn clear_active_state() {

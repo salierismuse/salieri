@@ -17,6 +17,7 @@ use crate::states::{
     get_state_by_name,
     clear_active_state,
     set_active_state,
+    delete_state_by_name,
 };
 
 use crate::user::increment_tasks_done;
@@ -426,9 +427,9 @@ pub async fn command_break(parts: &[&str], _app: AppHandle) -> Result<String, St
     }
 }
 
-// ─── /deleteT 
+// ─── /delete
 // add offset stuff
-pub async fn command_deleteT(parts: &[&str], _app: AppHandle) -> Result<String, String> { 
+pub async fn command_delete(parts: &[&str], _app: AppHandle) -> Result<String, String> {
     ensure_title!(parts);
     let title = parts[1..].join(" ");
 
@@ -440,23 +441,25 @@ pub async fn command_deleteT(parts: &[&str], _app: AppHandle) -> Result<String, 
         .find(|(_, t)| t.title == title)
         .map(|(id, _)| id.clone());
 
-    let task_id = match task_id_opt {
-        Some(id) => id,
-        None => {
-            drop(store_guard);
-            return Err(format!("Task '{}' not found for deletion.", title));
+    if let Some(task_id) = task_id_opt {
+        bucket.todo.remove(&task_id);
+        let current_active_id_opt = ACTIVE_TASK_ID.read().await.clone();
+        if current_active_id_opt.as_deref() == Some(&task_id) {
+            clear_active_task().await;
         }
-    };
-    bucket.todo.remove(&task_id);
-    let current_active_id_opt = ACTIVE_TASK_ID.read().await.clone();
-    if current_active_id_opt.as_deref() == Some(&task_id) {
-        clear_active_task().await;
+
+        drop(store_guard);
+        persist_global_store().await?;
+
+        return Ok(format!("Task '{}' deleted.", title));
     }
 
-    drop(store_guard); 
-    persist_global_store().await?; 
+    drop(store_guard);
 
-    Ok(format!("Task '{}' deleted.", title))
+    match crate::states::delete_state_by_name(&title).await {
+        Ok(_) => Ok(format!("State '{}' deleted.", title)),
+        Err(_) => Err(format!("Task or state '{}' not found for deletion.", title)),
+    }
 }
 
 // ─── /completed (placeholder)
