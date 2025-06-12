@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { writable } from 'svelte/store';
-  import { tasks, type Task } from '$lib/stores';
+  import { tasks, type Task, states, activeState, type State } from '$lib/stores';
   import { basicSetup } from 'codemirror'; 
   import {EditorView, keymap} from "@codemirror/view"; 
   import {defaultKeymap, selectPageDown} from "@codemirror/commands"
@@ -47,6 +47,9 @@
   let tiptapBool = false;
   let currentDayOffset = 0;
 
+  let editingStateId: string | null = null;
+  let editingStateName = '';
+
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
     { cmd: '/doing [task]', desc: 'start working on task' },
@@ -57,6 +60,7 @@
     { cmd: '/pause', desc: 'pause timer' },
     { cmd: '/resume', desc: 'resume timer' },
     { cmd: '/stop', desc: 'stop timer' },
+    { cmd: '/state [name]', desc: 'create a state' },
     { cmd: '/code', desc: 'toggle code editor' },
     { cmd: '/wq', desc: 'save and exit your work'},
     { cmd: '/write', desc: 'take notes, or write the next american novel'},
@@ -71,7 +75,11 @@
       const logicalDayKey = await invoke<string>('get_current_logical_day_key');
       currentLogicalDay.set(logicalDayKey);
       currentTaskDayDisplay = currentLogicalDay;
-      await load_tasks_for_day(logicalDayKey, done); 
+      await load_tasks_for_day(logicalDayKey, done);
+      const stateList = await invoke<State[]>('list_states');
+      states.set(stateList);
+      const curState = await invoke<State | null>('get_active_state');
+      activeState.set(curState);
 
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);
@@ -250,6 +258,10 @@ const payload = { days_offset: currentDayOffset };
     else if (cmd.startsWith('/completed')) done = true;
 
     await load_tasks_for_day(dayToLoad, done);
+    const latestStates = await invoke<State[]>('list_states');
+    states.set(latestStates);
+    const curState = await invoke<State | null>('get_active_state');
+    activeState.set(curState);
   }
 
   function handleKeydown(event: KeyboardEvent) {
@@ -269,6 +281,24 @@ const payload = { days_offset: currentDayOffset };
       console.error('failed loading tasks:', e);
     }
   }
+
+  async function removeState(id: string) {
+    await invoke('delete_state', { id });
+    states.update(s => s.filter(st => st.id !== id));
+  }
+
+  function startEditState(id: string, name: string) {
+    editingStateId = id;
+    editingStateName = name;
+  }
+
+  async function saveEditState(id: string) {
+    await invoke('edit_state', { id, name: editingStateName });
+    states.update(s => s.map(st => st.id === id ? { ...st, name: editingStateName } : st));
+    editingStateId = null;
+    editingStateName = '';
+  }
+
 
   async function toggleEditor(pathToLoad: string | null = null) {
     const next = !get(showEditor);
@@ -415,6 +445,9 @@ const payload = { days_offset: currentDayOffset };
             <div class="hint">use /doing [task] to begin</div>
           </div>
         {/if}
+        {#if $activeState}
+          <div class="active-state">state: {$activeState.name}</div>
+        {/if}
       </div>
 
       <div class="pomodoro-card">
@@ -462,6 +495,26 @@ const payload = { days_offset: currentDayOffset };
           </div>
         </div>
       {/if}
+
+      <div class="states-section">
+        <h3>states</h3>
+        <div class="state-list">
+          {#each $states as st}
+            <div class="state-item">
+              {#if editingStateId === st.id}
+                <input bind:value={editingStateName} />
+                <button on:click={() => saveEditState(st.id)}>save</button>
+              {:else}
+                <span>{st.name}</span>
+                <span>{Math.floor(st.total_time.secs / 60)}m</span>
+                <button on:click={() => startEditState(st.id, st.name)}>edit</button>
+                <button on:click={() => removeState(st.id)}>x</button>
+              {/if}
+            </div>
+          {/each}
+        </div>
+      </div>
+
     </section>
 
   
@@ -646,6 +699,12 @@ const payload = { days_offset: currentDayOffset };
     font-size: 1rem;
   }
 
+  .active-state {
+    margin-top: 0.5rem;
+    color: var(--fg-secondary);
+    font-size: 0.9rem;
+  }
+
   .task-idle .prompt {
     font-size: 1.2rem;
     color: var(--fg-secondary);
@@ -700,8 +759,13 @@ const payload = { days_offset: currentDayOffset };
     border-left: 1px solid var(--border);
   }
 
+
   .task-section {
     margin-bottom: 2rem;
+  }
+
+  .states-section {
+    margin-top: 2rem;
   }
 
   .task-section h3 {
@@ -747,6 +811,14 @@ const payload = { days_offset: currentDayOffset };
   .task-item.active .task-dot {
     background: var(--accent);
     box-shadow: 0 0 6px var(--accent);
+  }
+
+
+  .state-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
   }
 
   .task-check {
@@ -896,10 +968,11 @@ const payload = { days_offset: currentDayOffset };
     .workspace {
       grid-template-columns: 1fr;
     }
-    
+
     .task-panel {
       border-left: none;
       border-top: 1px solid var(--border);
     }
+
   }
 </style>
