@@ -47,15 +47,13 @@
   let tiptapBool = false;
   let currentDayOffset = 0;
 
-  let editingStateId: string | null = null;
-  let editingStateName = '';
 
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
     { cmd: '/doing [task]', desc: 'start working on task' },
     { cmd: '/done [task]', desc: 'mark task complete' },
     { cmd: '/break [task]', desc: 'pause current task' },
-    { cmd: '/deleteT [task]', desc: 'delete task' },
+    { cmd: '/delete [task|state]', desc: 'delete task or state' },
     { cmd: '/start', desc: 'begin pomodoro' },
     { cmd: '/pause', desc: 'pause timer' },
     { cmd: '/resume', desc: 'resume timer' },
@@ -282,22 +280,7 @@ const payload = { days_offset: currentDayOffset };
     }
   }
 
-  async function removeState(id: string) {
-    await invoke('delete_state', { id });
-    states.update(s => s.filter(st => st.id !== id));
-  }
 
-  function startEditState(id: string, name: string) {
-    editingStateId = id;
-    editingStateName = name;
-  }
-
-  async function saveEditState(id: string) {
-    await invoke('edit_state', { id, name: editingStateName });
-    states.update(s => s.map(st => st.id === id ? { ...st, name: editingStateName } : st));
-    editingStateId = null;
-    editingStateName = '';
-  }
 
 
   async function toggleEditor(pathToLoad: string | null = null) {
@@ -467,7 +450,6 @@ const payload = { days_offset: currentDayOffset };
       <div class="task-section">
         <h3>todo</h3>
         <div class="task-list">
-          <button on:click={handlePrev}>prev</button>
           {#if todoTasks.length === 0}
             <div class="empty-state">all clear</div>
           {:else}
@@ -478,7 +460,6 @@ const payload = { days_offset: currentDayOffset };
               </div>
             {/each}
           {/if}
-        <button on:click={handleNext}>next</button>
         </div>
       </div>
 
@@ -499,19 +480,16 @@ const payload = { days_offset: currentDayOffset };
       <div class="states-section">
         <h3>states</h3>
         <div class="state-list">
-          {#each $states as st}
-            <div class="state-item">
-              {#if editingStateId === st.id}
-                <input bind:value={editingStateName} />
-                <button on:click={() => saveEditState(st.id)}>save</button>
-              {:else}
+          {#if $states.length === 0}
+            <div class="empty-state">no states yet</div>
+          {:else}
+            {#each $states as st}
+              <div class="state-item">
                 <span>{st.name}</span>
                 <span>{Math.floor(st.total_time.secs / 60)}m</span>
-                <button on:click={() => startEditState(st.id, st.name)}>edit</button>
-                <button on:click={() => removeState(st.id)}>x</button>
-              {/if}
-            </div>
-          {/each}
+              </div>
+            {/each}
+          {/if}
         </div>
       </div>
 

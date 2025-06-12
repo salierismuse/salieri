@@ -2,7 +2,7 @@ use chrono::Local;
 use tauri::AppHandle;
 
 use crate::theme::{set_theme, get_current_theme};
-use crate::tasks::{command_todo, command_doing, command_done, command_break, command_completed, command_deleteT};
+use crate::tasks::{command_todo, command_doing, command_done, command_break, command_completed, command_delete};
 use crate::states::command_state;
 use crate::pomodoro::{command_start_pomodoro, command_pause_pomodoro, command_stop_pomodoro, command_resume_pomodoro};
 use crate::fileaccess::{command_code};
@@ -62,7 +62,7 @@ pub async fn handle_palette_command(command: String, app_handle: AppHandle, days
         Some(&"/doing") => command_doing(&parts, app_handle, days_offset).await,
         Some(&"/done") => command_done(&parts, app_handle, days_offset).await,
         Some(&"/break") => command_break(&parts, app_handle).await,
-        Some(&"/deleteT") => command_deleteT(&parts, app_handle).await,
+        Some(&"/delete") => command_delete(&parts, app_handle).await,
         Some(&"/completed") => command_completed(), 
         Some(&"/start") => command_start_pomodoro().await,
         Some(&"/pause") => command_pause_pomodoro().await,
