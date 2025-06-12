@@ -186,25 +186,29 @@ pub fn start_task_timer_loop(_h: AppHandle) {
             tick_count = tick_count.wrapping_add(1);
 
             let active_id_opt = ACTIVE_TASK_ID.read().await.clone();
-            let Some(id) = active_id_opt else { continue }; 
-
-            let mut store_guard = TASK_STORE.lock().await;
-            let today = today_key(0);
             let mut changed_in_loop = false;
             let mut state_for_tick: Option<String> = None;
-            if let Some(bucket) = store_guard.get_mut(&today) {
-                if let Some(task) = bucket.todo.get_mut(&id) {
-                    if task.status == "doing" {
-                        task.time_spent += 1;
-                        changed_in_loop = true;
-                        state_for_tick = task.state_id.clone();
+            if let Some(id) = active_id_opt {
+                let mut store_guard = TASK_STORE.lock().await;
+                let today = today_key(0);
+                if let Some(bucket) = store_guard.get_mut(&today) {
+                    if let Some(task) = bucket.todo.get_mut(&id) {
+                        if task.status == "doing" {
+                            task.time_spent += 1;
+                            changed_in_loop = true;
+                            state_for_tick = task.state_id.clone();
+                        }
                     }
                 }
+                drop(store_guard);
             }
-            drop(store_guard);
 
             if let Some(sid) = state_for_tick {
                 let _ = increment_total_time(&sid, Duration::from_secs(1)).await;
+            }
+
+            if increment_active_state(Duration::from_secs(1)).await.is_ok() {
+                changed_in_loop = true;
             }
 
             if changed_in_loop && tick_count % 60 == 0 {
@@ -322,7 +326,13 @@ pub async fn command_doing(parts: &[&str], _app: AppHandle, days_offset: Option<
         }
         None => {
             drop(store_guard);
-            return Err("task not found".into());
+            if let Some(state) = get_state_by_name(&title).await {
+                clear_active_state().await;
+                set_active_state(state).await;
+                return Ok("state active".into());
+            } else {
+                return Err("task/state not found".into());
+            }
         }
     };
 

@@ -9,8 +9,11 @@ mod fileaccess;
 mod states;
 
 use crate::theme::{set_theme, get_current_theme, ThemeChangedPayload, THEME_KEY, DEFAULT_THEME, SETTINGS_STORE_FILENAME};
-use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup, get_current_logical_day_key, create_task};
-use crate::states::{create_state, edit_state, delete_state, list_states};
+use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup, get_current_logical_day_key};
+use crate::states::{
+    create_state, edit_state, delete_state, list_states,
+    command_state, get_active_state,
+};
 use crate::pomodoro::init_pomodoro;
 use crate::commands::handle_palette_command;
 use crate::fileaccess::save_file;
@@ -63,11 +66,12 @@ fn main() {
             get_tasks,
             get_current_logical_day_key,
             save_file,
-            create_task,
             create_state,
             edit_state,
             delete_state,
             list_states,
+            command_state,
+            get_active_state,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

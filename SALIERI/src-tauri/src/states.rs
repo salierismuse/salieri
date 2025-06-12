@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize, de::DeserializeOwned};
 use uuid::Uuid;
 use lazy_static::lazy_static;
 use directories::ProjectDirs;
-use tokio::sync::Mutex as TokioMutex;
+use tokio::sync::{Mutex as TokioMutex, RwLock as TokioRwLock};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct State {
@@ -27,6 +27,8 @@ fn load_store_for_static_init() -> StateStore {
 
 lazy_static! {
     static ref STATE_STORE: TokioMutex<StateStore> = TokioMutex::new(load_store_for_static_init());
+    static ref ACTIVE_STATE_ID: TokioRwLock<Option<String>> = TokioRwLock::new(None);
+    static ref ACTIVE_STATE: TokioMutex<Option<State>> = TokioMutex::new(None);
 }
 
 fn data_dir() -> PathBuf {
@@ -111,3 +113,49 @@ pub async fn increment_total_time(id: &str, dur: Duration) -> Result<(), String>
 }
 
 pub async fn persist_states() -> Result<(), String> { persist_state_store().await }
+
+pub async fn get_state_by_name(name: &str) -> Option<State> {
+    let guard = STATE_STORE.lock().await;
+    guard.values().find(|s| s.name == name).cloned()
+}
+
+pub async fn clear_active_state() {
+    let mut id_guard = ACTIVE_STATE_ID.write().await;
+    *id_guard = None;
+    drop(id_guard);
+
+    let mut state_guard = ACTIVE_STATE.lock().await;
+    *state_guard = None;
+}
+
+pub async fn set_active_state(state: State) {
+    let mut id_guard = ACTIVE_STATE_ID.write().await;
+    *id_guard = Some(state.id.to_string());
+    drop(id_guard);
+
+    let mut state_guard = ACTIVE_STATE.lock().await;
+    *state_guard = Some(state);
+}
+
+#[tauri::command]
+pub async fn get_active_state() -> Option<State> {
+    ACTIVE_STATE.lock().await.clone()
+}
+
+pub async fn increment_active_state(dur: Duration) -> Result<(), String> {
+    if let Some(id) = ACTIVE_STATE_ID.read().await.clone() {
+        increment_total_time(&id, dur).await?
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn command_state(parts: &[&str]) -> Result<String, String> {
+    if parts.len() < 2 { return Err("usage: /state [name]".into()); }
+    let name = parts[1..].join(" ");
+    if get_state_by_name(&name).await.is_some() {
+        return Err("state already exists".into());
+    }
+    let _ = create_state(name).await?;
+    Ok("state created".into())
+}

@@ -19,6 +19,7 @@ export type State = {
 };
 
 export const states = writable<State[]>([]);
+export const activeState = writable<State | null>(null);
 
 // Create a custom store that handles persistence
 function createThemeStore() {
