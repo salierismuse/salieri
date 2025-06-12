@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { writable } from 'svelte/store';
-  import { tasks, type Task } from '$lib/stores';
+  import { tasks, type Task, states, type State } from '$lib/stores';
   import { basicSetup } from 'codemirror'; 
   import {EditorView, keymap} from "@codemirror/view"; 
   import {defaultKeymap, selectPageDown} from "@codemirror/commands"
@@ -71,7 +71,8 @@
       const logicalDayKey = await invoke<string>('get_current_logical_day_key');
       currentLogicalDay.set(logicalDayKey);
       currentTaskDayDisplay = currentLogicalDay;
-      await load_tasks_for_day(logicalDayKey, done); 
+      await load_tasks_for_day(logicalDayKey, done);
+      await load_states();
 
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);
@@ -270,6 +271,55 @@ const payload = { days_offset: currentDayOffset };
     }
   }
 
+  async function load_states() {
+    try {
+      const list = await invoke<State[]>('list_states');
+      states.set(list);
+    } catch (e) {
+      console.error('failed loading states:', e);
+    }
+  }
+
+  let newTaskTitle = '';
+  let newTaskState: string = '';
+
+  async function createTask() {
+    if (!newTaskTitle.trim()) return;
+    await invoke('create_task', { title: newTaskTitle, state_id: newTaskState || null });
+    newTaskTitle = '';
+    newTaskState = '';
+    await load_tasks_for_day($currentLogicalDay || new Date().toISOString().split('T')[0], false);
+  }
+
+  let newStateName = '';
+  let editingState: State | null = null;
+  let editStateName = '';
+
+  async function createState() {
+    if (!newStateName.trim()) return;
+    await invoke('create_state', { name: newStateName });
+    newStateName = '';
+    await load_states();
+  }
+
+  function beginEdit(state: State) {
+    editingState = state;
+    editStateName = state.name;
+  }
+
+  async function saveStateEdit() {
+    if (!editingState) return;
+    await invoke('edit_state', { id: editingState.id, name: editStateName });
+    editingState = null;
+    editStateName = '';
+    await load_states();
+  }
+
+  async function deleteState(id: string) {
+    await invoke('delete_state', { id });
+    await load_states();
+  }
+
   async function toggleEditor(pathToLoad: string | null = null) {
     const next = !get(showEditor);
     showEditor.set(next);
@@ -431,37 +481,73 @@ const payload = { days_offset: currentDayOffset };
 
     <!-- Task Panel -->
     <section class="task-panel">
-      <div class="task-section">
-        <h3>todo</h3>
-        <div class="task-list">
-          <button on:click={handlePrev}>prev</button>
-          {#if todoTasks.length === 0}
-            <div class="empty-state">all clear</div>
-          {:else}
-            {#each todoTasks as task (task.id)}
-              <div class="task-item" class:active={task.status === 'doing'}>
-                <div class="task-dot"></div>
-                <span class="task-text">{task.title}</span>
-              </div>
-            {/each}
-          {/if}
-        <button on:click={handleNext}>next</button>
-        </div>
-      </div>
+      <div class="task-panel-inner">
+        <div class="tasks-column">
+          <div class="task-section">
+            <h3>todo</h3>
+            <div class="task-list">
+              <button on:click={handlePrev}>prev</button>
+              {#if todoTasks.length === 0}
+                <div class="empty-state">all clear</div>
+              {:else}
+                {#each todoTasks as task (task.id)}
+                  <div class="task-item" class:active={task.status === 'doing'}>
+                    <div class="task-dot"></div>
+                    <span class="task-text">{task.title}</span>
+                  </div>
+                {/each}
+              {/if}
+              <button on:click={handleNext}>next</button>
+            </div>
+          </div>
 
-      {#if doneTasks.length > 0}
-        <div class="task-section completed">
-          <h3>completed</h3>
-          <div class="task-list">
-            {#each doneTasks.slice(0, 5) as task (task.id)}
-              <div class="task-item done">
-                <div class="task-check">✓</div>
-                <span class="task-text">{task.title}</span>
+          {#if doneTasks.length > 0}
+            <div class="task-section completed">
+              <h3>completed</h3>
+              <div class="task-list">
+                {#each doneTasks.slice(0, 5) as task (task.id)}
+                  <div class="task-item done">
+                    <div class="task-check">✓</div>
+                    <span class="task-text">{task.title}</span>
+                  </div>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+          <div class="task-create">
+            <input bind:value={newTaskTitle} placeholder="task title" />
+            <select bind:value={newTaskState}>
+              <option value="">none</option>
+              {#each $states as st}
+                <option value={st.id}>{st.name}</option>
+              {/each}
+            </select>
+            <button on:click={createTask}>add</button>
+          </div>
+        </div>
+
+        <div class="states-column">
+          <h3>states</h3>
+          <div class="state-list">
+            {#each $states as st (st.id)}
+              <div class="state-item">
+                <span class="state-name">{st.name}</span>
+                <span class="state-time">{Math.floor(st.total_time / 60)}m</span>
+                <button on:click={() => beginEdit(st)}>edit</button>
+                <button on:click={() => deleteState(st.id)}>x</button>
               </div>
             {/each}
           </div>
+          {#if editingState}
+            <input bind:value={editStateName} />
+            <button on:click={saveStateEdit}>save</button>
+          {:else}
+            <input bind:value={newStateName} placeholder="new state" />
+            <button on:click={createState}>add</button>
+          {/if}
         </div>
-      {/if}
+      </div>
     </section>
 
   
@@ -698,6 +784,27 @@ const payload = { days_offset: currentDayOffset };
     padding: 2rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
+  }
+
+  .task-panel-inner {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2rem;
+  }
+
+  .state-item, .task-create {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+  }
+
+  .states-column h3 {
+    margin-bottom: 1rem;
+  }
+
+  .state-time {
+    color: var(--fg-muted);
+    font-size: 0.8rem;
   }
 
   .task-section {
