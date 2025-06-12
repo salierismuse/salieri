@@ -21,9 +21,7 @@
     "@tiptap/core": "^2.12.0",
     "@tiptap/pm": "^2.12.0",
     "@tiptap/starter-kit": "^2.12.0",
-    "codemirror": "^6.0.1",
-    "regex": "1.10",
-    "indexmap": "{ version = 2.0, features = [serde] }"
+    "codemirror": "^6.0.1"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.6",
