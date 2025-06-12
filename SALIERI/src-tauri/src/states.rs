@@ -149,7 +149,6 @@ pub async fn increment_active_state(dur: Duration) -> Result<(), String> {
     Ok(())
 }
 
-#[tauri::command]
 pub async fn command_state(parts: &[&str]) -> Result<String, String> {
     if parts.len() < 2 { return Err("usage: /state [name]".into()); }
     let name = parts[1..].join(" ");

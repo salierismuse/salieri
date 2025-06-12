@@ -1,8 +1,7 @@
 use chrono::{Local, Duration as ChronoDuration, NaiveDate};
 use tauri::AppHandle;
 use uuid::Uuid;
-use once_cell::sync::Lazy;
-use std::{collections::HashMap, fs, path::{Path, PathBuf}, sync::Mutex, time::Duration};
+use std::{fs, path::{Path, PathBuf}, time::Duration};
 use directories::ProjectDirs;
 use tokio::sync::RwLock as TokioRwLock;
 use futures::executor;         
@@ -11,7 +10,14 @@ use tokio::sync::Mutex as TokioMutex;
 use lazy_static::lazy_static;
 use indexmap::IndexMap;
 
-use crate::states::{increment_total_time, persist_states};
+use crate::states::{
+    increment_total_time,
+    persist_states,
+    increment_active_state,
+    get_state_by_name,
+    clear_active_state,
+    set_active_state,
+};
 
 use crate::user::increment_tasks_done;
 

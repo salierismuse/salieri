@@ -12,7 +12,7 @@ use crate::theme::{set_theme, get_current_theme, ThemeChangedPayload, THEME_KEY,
 use crate::tasks::{get_tasks, start_task_timer_loop, clear_active_startup, get_current_logical_day_key};
 use crate::states::{
     create_state, edit_state, delete_state, list_states,
-    command_state, get_active_state,
+    get_active_state,
 };
 use crate::pomodoro::init_pomodoro;
 use crate::commands::handle_palette_command;
@@ -70,7 +70,6 @@ fn main() {
             edit_state,
             delete_state,
             list_states,
-            command_state,
             get_active_state,
         ])
         .run(tauri::generate_context!())
