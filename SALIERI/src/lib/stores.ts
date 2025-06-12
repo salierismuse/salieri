@@ -12,6 +12,14 @@ export type Task = {
 
 export const tasks = writable<Task[]>([]);
 
+export type State = {
+  id: string;
+  name: string;
+  total_time: { secs: number; nanos: number };
+};
+
+export const states = writable<State[]>([]);
+
 // Create a custom store that handles persistence
 function createThemeStore() {
     const { subscribe, set, update } = writable<'light' | 'dark'>('dark');

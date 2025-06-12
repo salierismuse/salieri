@@ -3,7 +3,7 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { writable } from 'svelte/store';
-  import { tasks, type Task } from '$lib/stores';
+  import { tasks, type Task, states, type State } from '$lib/stores';
   import { basicSetup } from 'codemirror'; 
   import {EditorView, keymap} from "@codemirror/view"; 
   import {defaultKeymap, selectPageDown} from "@codemirror/commands"
@@ -47,6 +47,13 @@
   let tiptapBool = false;
   let currentDayOffset = 0;
 
+  let newStateName = '';
+  let editingStateId: string | null = null;
+  let editingStateName = '';
+
+  let newTaskTitle = '';
+  let newTaskStateId = '';
+
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
     { cmd: '/doing [task]', desc: 'start working on task' },
@@ -71,7 +78,9 @@
       const logicalDayKey = await invoke<string>('get_current_logical_day_key');
       currentLogicalDay.set(logicalDayKey);
       currentTaskDayDisplay = currentLogicalDay;
-      await load_tasks_for_day(logicalDayKey, done); 
+      await load_tasks_for_day(logicalDayKey, done);
+      const stateList = await invoke<State[]>('list_states');
+      states.set(stateList);
 
       document.documentElement.classList.remove('light', 'dark');
       document.documentElement.classList.add(initialTheme);
@@ -270,6 +279,38 @@ const payload = { days_offset: currentDayOffset };
     }
   }
 
+  async function addState() {
+    if (!newStateName.trim()) return;
+    const st = await invoke<State>('create_state', { name: newStateName });
+    states.update(s => [...s, st]);
+    newStateName = '';
+  }
+
+  async function removeState(id: string) {
+    await invoke('delete_state', { id });
+    states.update(s => s.filter(st => st.id !== id));
+  }
+
+  function startEditState(id: string, name: string) {
+    editingStateId = id;
+    editingStateName = name;
+  }
+
+  async function saveEditState(id: string) {
+    await invoke('edit_state', { id, name: editingStateName });
+    states.update(s => s.map(st => st.id === id ? { ...st, name: editingStateName } : st));
+    editingStateId = null;
+    editingStateName = '';
+  }
+
+  async function createTaskUI() {
+    if (!newTaskTitle.trim()) return;
+    const task: Task = await invoke('create_task', { title: newTaskTitle, state_id: newTaskStateId || null });
+    tasks.update(t => [...t, task]);
+    newTaskTitle = '';
+    newTaskStateId = '';
+  }
+
   async function toggleEditor(pathToLoad: string | null = null) {
     const next = !get(showEditor);
     showEditor.set(next);
@@ -429,6 +470,30 @@ const payload = { days_offset: currentDayOffset };
       </div>
     </section>
 
+    <!-- States Panel -->
+    <section class="states-panel">
+      <h3>states</h3>
+      <div class="state-list">
+        {#each $states as st}
+          <div class="state-item">
+            {#if editingStateId === st.id}
+              <input bind:value={editingStateName} />
+              <button on:click={() => saveEditState(st.id)}>save</button>
+            {:else}
+              <span>{st.name}</span>
+              <span>{Math.floor(st.total_time.secs / 60)}m</span>
+              <button on:click={() => startEditState(st.id, st.name)}>edit</button>
+              <button on:click={() => removeState(st.id)}>x</button>
+            {/if}
+          </div>
+        {/each}
+      </div>
+      <div class="state-create">
+        <input placeholder="new state" bind:value={newStateName} />
+        <button on:click={addState}>add</button>
+      </div>
+    </section>
+
     <!-- Task Panel -->
     <section class="task-panel">
       <div class="task-section">
@@ -462,6 +527,17 @@ const payload = { days_offset: currentDayOffset };
           </div>
         </div>
       {/if}
+
+      <div class="task-create">
+        <input placeholder="new task" bind:value={newTaskTitle} />
+        <select bind:value={newTaskStateId}>
+          <option value="">none</option>
+          {#each $states as st}
+            <option value={st.id}>{st.name}</option>
+          {/each}
+        </select>
+        <button on:click={createTaskUI}>add</button>
+      </div>
     </section>
 
   
@@ -599,14 +675,14 @@ const payload = { days_offset: currentDayOffset };
   .workspace {
     flex: 1;
     display: grid;
-    grid-template-columns: 1fr 300px;
+    grid-template-columns: 1fr 300px 200px;
     gap: 1px;
     background: var(--border);
     overflow: hidden;
   }
 
   .workspace.with-editor {
-    grid-template-columns: 1fr 300px 1fr;
+    grid-template-columns: 1fr 300px 200px 1fr;
   }
 
   .focus-zone {
@@ -700,6 +776,13 @@ const payload = { days_offset: currentDayOffset };
     border-left: 1px solid var(--border);
   }
 
+  .states-panel {
+    background: var(--bg-secondary);
+    padding: 2rem;
+    overflow-y: auto;
+    border-left: 1px solid var(--border);
+  }
+
   .task-section {
     margin-bottom: 2rem;
   }
@@ -747,6 +830,19 @@ const payload = { days_offset: currentDayOffset };
   .task-item.active .task-dot {
     background: var(--accent);
     box-shadow: 0 0 6px var(--accent);
+  }
+
+  .task-create, .state-create {
+    margin-top: 1rem;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .state-item {
+    display: flex;
+    gap: 0.5rem;
+    align-items: center;
+    margin-bottom: 0.5rem;
   }
 
   .task-check {
@@ -896,10 +992,14 @@ const payload = { days_offset: currentDayOffset };
     .workspace {
       grid-template-columns: 1fr;
     }
-    
+
     .task-panel {
       border-left: none;
       border-top: 1px solid var(--border);
+    }
+
+    .states-panel {
+      display: none;
     }
   }
 </style>

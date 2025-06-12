@@ -11,6 +11,8 @@ use tokio::sync::Mutex as TokioMutex;
 use lazy_static::lazy_static;
 use indexmap::IndexMap;
 
+use crate::states::{increment_total_time, persist_states};
+
 use crate::user::increment_tasks_done;
 
 fn load_store_for_static_init() -> Store { // Renamed for clarity of purpose
@@ -81,9 +83,11 @@ type LogicalDay  = String;
 pub struct Task {
     pub id: String,
     pub title: String,
-    pub status: String,     
-    pub created_at: String, 
-    pub time_spent: u64,   
+    pub status: String,
+    pub created_at: String,
+    pub time_spent: u64,
+    #[serde(default)]
+    pub state_id: Option<String>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Default)]
@@ -187,19 +191,28 @@ pub fn start_task_timer_loop(_h: AppHandle) {
             let mut store_guard = TASK_STORE.lock().await;
             let today = today_key(0);
             let mut changed_in_loop = false;
+            let mut state_for_tick: Option<String> = None;
             if let Some(bucket) = store_guard.get_mut(&today) {
                 if let Some(task) = bucket.todo.get_mut(&id) {
                     if task.status == "doing" {
                         task.time_spent += 1;
                         changed_in_loop = true;
+                        state_for_tick = task.state_id.clone();
                     }
                 }
             }
-            drop(store_guard); 
+            drop(store_guard);
 
-            if changed_in_loop && tick_count % 60 == 0 { 
+            if let Some(sid) = state_for_tick {
+                let _ = increment_total_time(&sid, Duration::from_secs(1)).await;
+            }
+
+            if changed_in_loop && tick_count % 60 == 0 {
                 if let Err(e) = persist_global_store().await {
                     eprintln!("Timer loop failed to save store: {}", e);
+                }
+                if let Err(e) = persist_states().await {
+                    eprintln!("Timer loop failed to save states: {}", e);
                 }
             }
         }
@@ -238,7 +251,7 @@ pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, Str
         return Err("duplicate title".into());
     }
 
-    let task = Task { id: Uuid::new_v4().to_string(), title: title.clone(), status: "todo".into(), created_at: day.clone(), time_spent: 0 };
+    let task = Task { id: Uuid::new_v4().to_string(), title: title.clone(), status: "todo".into(), created_at: day.clone(), time_spent: 0, state_id: None };
     bucket.todo.insert(task.id.clone(), task);
 
     let store_data_to_save = store_guard.clone(); 
@@ -250,6 +263,33 @@ pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, Str
         .map_err(|e| format!("Failed to save store: {}", e))?;
 
     Ok("added".into())
+}
+
+#[tauri::command]
+pub async fn create_task(title: String, state_id: Option<String>) -> Result<Task, String> {
+    if title.trim().is_empty() { return Err("need task title".into()); }
+    let day = today_key(0);
+    let mut store_guard = TASK_STORE.lock().await;
+    let bucket = bucket_mut(&mut *store_guard, &day);
+    if bucket.todo.values().any(|t| t.title == title) || bucket.done.values().any(|t| t.title == title) {
+        return Err("duplicate title".into());
+    }
+    let task = Task {
+        id: Uuid::new_v4().to_string(),
+        title: title.clone(),
+        status: "todo".into(),
+        created_at: day.clone(),
+        time_spent: 0,
+        state_id,
+    };
+    bucket.todo.insert(task.id.clone(), task.clone());
+    let store_data_to_save = store_guard.clone();
+    drop(store_guard);
+    tauri::async_runtime::spawn_blocking(move || save_json(&store_path(), &store_data_to_save))
+        .await
+        .map_err(|e| format!("Failed to join save task: {}", e))?
+        .map_err(|e| format!("Failed to save store: {}", e))?;
+    Ok(task)
 }
 
 // ─── /doing
