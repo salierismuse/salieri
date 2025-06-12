@@ -413,14 +413,14 @@ const payload = { days_offset: currentDayOffset };
   </header>
 
   <div class="workspace">
-    <!-- Focus Zone -->
-    <section class="focus-zone">
-      <div class="active-task-card">
-        <h2>focus</h2>
-        {#if activeTask}
-          <div class="task-active">
-            <div class="task-title">{activeTask.title}</div>
-            <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}</div>
+    <div class="left-pane">
+      <section class="focus-zone">
+        <div class="active-task-card">
+          <h2>focus</h2>
+          {#if activeTask}
+            <div class="task-active">
+              <div class="task-title">{activeTask.title}</div>
+              <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}</div>
           </div>
         {:else}
           <div class="task-idle">
@@ -431,21 +431,36 @@ const payload = { days_offset: currentDayOffset };
         {#if $activeState}
           <div class="active-state">state: {$activeState.name}</div>
         {/if}
-      </div>
-
-      <div class="pomodoro-card">
-        <div class="timer-display">
-          <div class="timer-icon">{getTimerStateIcon($timerState)}</div>
-          <div class="timer-time">{formatTime($remainingTime)}</div>
-          <div class="timer-state">{$timerState.toLowerCase()}</div>
         </div>
-        <div class="timer-progress">
-          <div class="progress-bar" style="width: {getTimerProgress()}%"></div>
-        </div>
-      </div>
-    </section>
 
-    <!-- Task Panel -->
+        <div class="pomodoro-card">
+          <div class="timer-display">
+            <div class="timer-icon">{getTimerStateIcon($timerState)}</div>
+            <div class="timer-time">{formatTime($remainingTime)}</div>
+            <div class="timer-state">{$timerState.toLowerCase()}</div>
+          </div>
+          <div class="timer-progress">
+            <div class="progress-bar" style="width: {getTimerProgress()}%"></div>
+          </div>
+        </div>
+      </section>
+
+      <div class="editor-space">
+        {#if tiptapBool}
+          <div class="writer-container" bind:this={element}></div>
+        {/if}
+
+        {#if $showEditor}
+          <section class="editor-panel">
+            <div class="editor-header">
+              <span>code</span>
+            </div>
+            <div class="editor-container" bind:this={editorDiv}></div>
+          </section>
+        {/if}
+      </div>
+    </div>
+
     <section class="task-panel">
       <div class="task-section">
         <h3>todo</h3>
@@ -496,21 +511,6 @@ const payload = { days_offset: currentDayOffset };
     </section>
 
   
-    {#if tiptapBool}
-      <div bind:this={element}>
-      </div>
-    {/if}
-
-    <!-- Editor Panel -->
-    {#if $showEditor}
-      <section class="editor-panel">
-        <div class="editor-header">
-          <span>code</span>
-         <!---- <button class="close-btn" on:click={toggleEditor}>×</button> -->
-        </div>
-        <div class="editor-container" bind:this={editorDiv}></div>
-      </section>
-    {/if}
   </div>
 
   <!-- Command Line -->
@@ -631,22 +631,39 @@ const payload = { days_offset: currentDayOffset };
     flex: 1;
     display: grid;
     grid-template-columns: 1fr 300px;
-    gap: 1px;
+    gap: 0.5rem;
+    padding: 0.5rem;
     background: var(--border);
     overflow: hidden;
   }
 
-  .workspace.with-editor {
-    grid-template-columns: 1fr 300px 1fr;
+  .left-pane {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    gap: 0.5rem;
+  }
+
+  .editor-space {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .writer-container {
+    flex: 1;
+    padding: 1rem;
+    overflow-y: auto;
   }
 
   .focus-zone {
     background: var(--bg-primary);
-    padding: 2rem;
+    padding: 0.5rem;
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    gap: 2rem;
+    gap: 0.5rem;
   }
 
   .active-task-card, .pomodoro-card {
@@ -735,6 +752,7 @@ const payload = { days_offset: currentDayOffset };
     padding: 2rem;
     overflow-y: auto;
     border-left: 1px solid var(--border);
+    grid-row: 1 / span 2;
   }
 
 
@@ -823,10 +841,12 @@ const payload = { days_offset: currentDayOffset };
   }
 
   .editor-panel {
-    background: var(--bg-primary);
-    border-left: 1px solid var(--border);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
   }
 
   .editor-header {
@@ -945,6 +965,7 @@ const payload = { days_offset: currentDayOffset };
   @media (max-width: 1200px) {
     .workspace {
       grid-template-columns: 1fr;
+      grid-template-rows: auto auto 1fr;
     }
 
     .task-panel {
