@@ -34,7 +34,7 @@ Node.js 16+
 npm or yarn
 
 ## Build from Source
-bashgit clone https://github.com/yourusername/salieri.git
+bashgit clone https://github.com/salierismuse/salieri.git
 
 cd salieri
 
