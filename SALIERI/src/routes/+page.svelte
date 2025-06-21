@@ -19,11 +19,25 @@
   import { indentLess } from '@codemirror/commands'
   import { markdown } from "@codemirror/lang-markdown";
  // import Tiptap from '$lib/TipTap.svelte'
-  import { Editor } from '@tiptap/core'
+  import { Editor, Extension } from '@tiptap/core'
   import StarterKit from '@tiptap/starter-kit'
 
+  const TabExtension = Extension.create( {
+    name: 'tab',
 
+    addKeyboardShortcuts() {
+      return {
+        Tab: () => {
+          return this.editor.commands.insertContent('    ')
+        },
+        'Shift-Tab': () => {
+          return true
+        }
+        }
+      }
+    })
 
+  
   export const theme = writable<'light' | 'dark'>('dark');
   export const timerState = writable<'Idle' | 'Running' | 'Paused' | 'ShortBreak' | 'LongBreak'>('Idle');
   export let remainingTime = writable(25 * 60);
@@ -47,6 +61,8 @@
   let tiptapBool = false;
   let currentDayOffset = 0;
 
+
+  
   const commands = [
     { cmd: '/todo [task]', desc: 'add new task' },
     { cmd: '/doing [task]', desc: 'start working on task' },
@@ -159,10 +175,13 @@ const payload = { days_offset: currentDayOffset };
 }
 
   async function toggleWriter(content: string) {
+    
       editor = new Editor({
+        
       element: element,
       extensions: [
          StarterKit,
+         TabExtension,
       ],
       content: content,
       })
@@ -191,10 +210,12 @@ const payload = { days_offset: currentDayOffset };
       if (cmd.startsWith('/write')) {
         const parts = cmd.split(' ');
         currFile = parts.slice(1).join(' ').trim();
-        tiptapBool = true;  
-        await tick();
-        toggleWriter(commandOutput as string);
+        const content = await invoke('handle_palette_command', { command: cmd, days_offset: currentDayOffset });
+        if (typeof content !== 'string' || content.startsWith('error')) {
+          return;
+        }
 
+        toggleEditor(content.trim() === '' ? '<p></p>' : content, 'write');
         return;
     }
 
@@ -283,17 +304,31 @@ const payload = { days_offset: currentDayOffset };
     }
   }
 
-  async function toggleEditor(pathToLoad: string | null = null) {
+  async function toggleEditor(content: string | null = null, mode: 'code' | 'write' = 'code') {
     const next = !get(showEditor);
     showEditor.set(next);
 
-    if (next) {
-      await tick();
-      await mountEditor(pathToLoad ?? '~');  
-    } else {
+    if (!next) {
       myView?.destroy();
+      editor?.destroy();
       myView = null;
-    }
+      tiptapBool = false;
+      return;
+  }
+  
+  if (mode === 'write') {
+    tiptapBool = true;
+    await tick();
+    editor = new Editor({
+      element,
+      extensions: [StarterKit, TabExtension], 
+      content: content || '',
+    });
+  } else {
+    tiptapBool = false;
+    await tick();
+    mountEditor(content || '');
+  }
   }
 
   async function mountEditor(filePath: string) {
@@ -413,84 +448,96 @@ const payload = { days_offset: currentDayOffset };
   </header>
 
   <div class="workspace">
-    <!-- Focus Zone -->
-    <section class="focus-zone">
-      <div class="active-task-card">
-        <h2>focus</h2>
-        {#if activeTask}
-          <div class="task-active">
-            <div class="task-title">{activeTask.title}</div>
-            <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}</div>
-          </div>
-        {:else}
-          <div class="task-idle">
-            <div class="prompt">ready to focus?</div>
-            <div class="hint">use /doing [task] to begin</div>
-          </div>
-        {/if}
-      </div>
-
-      <div class="pomodoro-card">
-        <div class="timer-display">
-          <div class="timer-icon">{getTimerStateIcon($timerState)}</div>
-          <div class="timer-time">{formatTime($remainingTime)}</div>
-          <div class="timer-state">{$timerState.toLowerCase()}</div>
-        </div>
-        <div class="timer-progress">
-          <div class="progress-bar" style="width: {getTimerProgress()}%"></div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Task Panel -->
-    <section class="task-panel">
-      <div class="task-section">
-        <h3>todo {$currentTaskDayDisplay}</h3>
-        <div class="task-list">
-          {#if todoTasks.length === 0}
-            <div class="empty-state">you should do something</div>
+    <!-- Left Column -->
+    <div class="left-column">
+      <!-- Focus Zone -->
+      <section class="focus-zone">
+        <div class="active-task-card">
+          <h2>focus</h2>
+          {#if activeTask}
+            <div class="task-active">
+              <div class="task-title">{activeTask.title}</div>
+              <div class="task-timer">{Math.floor(activeTask.time_spent / 60)}m {activeTask.time_spent % 60}</div>
+            </div>
           {:else}
-            {#each todoTasks as task (task.id)}
-              <div class="task-item" class:active={task.status === 'doing'}>
-                <div class="task-dot"></div>
-                <span class="task-text">{task.title}</span>
-              </div>
-            {/each}
+            <div class="task-idle">
+              <div class="prompt">ready to focus?</div>
+              <div class="hint">use /doing [task] to begin</div>
+            </div>
           {/if}
         </div>
-      </div>
 
-      {#if doneTasks.length > 0}
-        <div class="task-section completed">
-          <h3>completed</h3>
-          <div class="task-list">
-            {#each doneTasks.slice(0, 5) as task (task.id)}
-              <div class="task-item done">
-                <div class="task-check">✓</div>
-                <span class="task-text">{task.title}</span>
-              </div>
-            {/each}
+        <div class="pomodoro-card">
+          <div class="timer-display">
+            <div class="timer-icon">{getTimerStateIcon($timerState)}</div>
+            <div class="timer-time">{formatTime($remainingTime)}</div>
+            <div class="timer-state">{$timerState.toLowerCase()}</div>
+          </div>
+          <div class="timer-progress">
+            <div class="progress-bar" style="width: {getTimerProgress()}%"></div>
           </div>
         </div>
-      {/if}
-    </section>
+      </section>
 
-    <!-- Editor Panel -->
-   <!-- {#if $showEditor} -->
-      <section class="editor-panel">
-        <div class="editor-header">
-          <span>what will you write?</span>
-        </div>
-      {#if tiptapBool}
+      <!-- Editor Panel -->
+     <!-- {#if $showEditor} -->
+        <section class="editor-panel">
+          <div class="editor-header">
+            <span>what will you write?</span>
+          </div>
+        {#if tiptapBool}
 
-        <div class ="editor-container" bind:this={element}>
-          
-        </div>
+          <div class ="editor-container" bind:this={element}>
+            
+          </div>
+        {:else}
+            <div class="editor-container" bind:this={editorDiv}></div>
+        {/if}
+      </section>
+      <!-- {/if}-->
+    </div>
+
+<!-- Task Panel -->
+<section class="task-panel">
+  <div class="task-section">
+    <h3>todo {$currentTaskDayDisplay}</h3>
+    <div class="task-list">
+      {#if todoTasks.length === 0}
+        <div class="empty-state">you should do something</div>
       {:else}
-          <div class="editor-container" bind:this={editorDiv}></div>
+        {#each todoTasks as task (task.id)}
+          <div class="task-item" class:active={task.status === 'doing'}>
+            <div class="task-dot"></div>
+            <span class="task-text">{task.title}</span>
+          </div>
+        {/each}
       {/if}
-    </section>
-    <!-- {/if}-->
+    </div>
+  </div>
+
+  {#if doneTasks.length > 0}
+    <div class="task-section completed">
+      <h3>completed</h3>
+      <div class="task-list">
+        {#each doneTasks.slice(0, 5) as task (task.id)}
+          <div class="task-item done">
+            <div class="task-check">✓</div>
+            <span class="task-text">{task.title}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- Add states section here -->
+  <div class="task-section states">
+    <h3>states</h3>
+    <div class="states-content">
+      <!-- your states content goes here -->
+    </div>
+  </div>
+</section>
+
     </div>
 
   <!-- Command Line -->
@@ -510,6 +557,7 @@ const payload = { days_offset: currentDayOffset };
       <div class="prompt-symbol">$</div>
       <input
         type="text"
+        autocomplete="off"
         id="command-line"
         bind:value={commandInput}
         placeholder="type a command or /? for help"
@@ -610,15 +658,17 @@ const payload = { days_offset: currentDayOffset };
 
   .workspace {
     flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 300px;
+    display: flex;
     gap: 1px;
     background: var(--border);
     overflow: hidden;
   }
 
-  .workspace.with-editor {
-    grid-template-columns: 1fr 300px 1fr;
+  .left-column {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
   }
 
   .focus-zone {
@@ -628,6 +678,7 @@ const payload = { days_offset: currentDayOffset };
     flex-direction: column;
     justify-content: center;
     gap: 2rem;
+    flex: 1;
   }
 
   .active-task-card, .pomodoro-card {
@@ -706,11 +757,15 @@ const payload = { days_offset: currentDayOffset };
   }
 
   .task-panel {
-    background: var(--bg-secondary);
-    padding: 2rem;
-    overflow-y: auto;
-    border-left: 1px solid var(--border);
-  }
+  background: var(--bg-secondary);
+  padding: 2rem;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 400px;
+  flex-shrink: 0;
+}
 
   .task-section {
     margin-bottom: 2rem;
@@ -777,6 +832,19 @@ const payload = { days_offset: currentDayOffset };
     text-decoration: line-through;
   }
 
+  .task-section.states {
+  border-top: 1px solid var(--border);
+  margin-top: auto; 
+  padding-top: 1rem;
+  flex: 1;
+  margin-bottom: 0; 
+}
+
+.states-content {
+  flex: 1;
+  overflow-y: auto;
+}
+
   .empty-state {
     color: var(--fg-muted);
     font-style: italic;
@@ -786,13 +854,13 @@ const payload = { days_offset: currentDayOffset };
 
   .editor-panel {
     background: var(--bg-primary);
-    border-left: 1px solid var(--border);
+    border-top: 1px solid var(--border);
     height: 420px;
     display: flex;
     flex-direction: column;
     overflow: hidden;
     scrollbar-color: black;
-    min-height:100%;
+    flex-shrink: 0;
   }
 
   .editor-header {
@@ -917,12 +985,17 @@ const payload = { days_offset: currentDayOffset };
 
   @media (max-width: 1200px) {
     .workspace {
-      grid-template-columns: 1fr;
+      flex-direction: column;
+    }
+    
+    .left-column {
+      width: 100%;
     }
     
     .task-panel {
       border-left: none;
       border-top: 1px solid var(--border);
+      width: 100%;
     }
   }
 </style>
