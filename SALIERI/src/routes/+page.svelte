@@ -65,12 +65,26 @@
 
   onMount(async () => {
     try {
+
+      const handleGlobalKeydown = (event: KeyboardEvent) => {
+        if (event.ctrlKey && event.key === '`') {
+          event.preventDefault();
+          event.stopPropagation();
+          const cmd = document.getElementById('command-line');
+          cmd?.focus();
+        }
+        
+    
+      }
+
+      document.addEventListener('keydown', handleGlobalKeydown, true);
+
       const initialTheme = await invoke<'light' | 'dark'>('get_current_theme');
       theme.set(initialTheme);
 
       const logicalDayKey = await invoke<string>('get_current_logical_day_key');
       currentLogicalDay.set(logicalDayKey);
-      currentTaskDayDisplay = currentLogicalDay;
+      currentTaskDayDisplay.set(logicalDayKey);
       await load_tasks_for_day(logicalDayKey, done); 
 
       document.documentElement.classList.remove('light', 'dark');
@@ -105,8 +119,6 @@
   // task handling
 async function handlePrev() {
   currentDayOffset += 1;
-  console.log('handlePrev called, currentDayOffset is now', currentDayOffset);
-
   // must be exactly "days_offset"
 const payload = { days_offset: currentDayOffset };
 console.log('calling get_current_logical_day_key with payload:', JSON.stringify(payload));
@@ -114,8 +126,9 @@ console.log('calling get_current_logical_day_key with payload:', JSON.stringify(
     'get_current_logical_day_key',
     { daysOffset: currentDayOffset }
   );
-  console.log('get_current_logical_day_key returned:', currentTaskDayDisplayKey);
 
+  console.log('get_current_logical_day_key returned:', currentTaskDayDisplayKey);
+  currentTaskDayDisplay.set(currentTaskDayDisplayKey);
   const newTasks = await invoke<Task[]>('get_tasks', {
     day: currentTaskDayDisplayKey,
     done,
@@ -135,11 +148,11 @@ const payload = { days_offset: currentDayOffset };
     'get_current_logical_day_key',
     { daysOffset: currentDayOffset }
   );
-
+  currentTaskDayDisplay.set(currentTaskDayDisplayKey);
   const newTasks = await invoke<Task[]>('get_tasks', {
-    day: currentTaskDayDisplayKey,
-    done,
-    days_offset: currentDayOffset
+  day: currentTaskDayDisplayKey,
+  done,
+  days_offset: currentDayOffset
   });
 
   tasks.set(newTasks);
@@ -432,11 +445,10 @@ const payload = { days_offset: currentDayOffset };
     <!-- Task Panel -->
     <section class="task-panel">
       <div class="task-section">
-        <h3>todo</h3>
+        <h3>todo {$currentTaskDayDisplay}</h3>
         <div class="task-list">
-          <button on:click={handlePrev}>prev</button>
           {#if todoTasks.length === 0}
-            <div class="empty-state">all clear</div>
+            <div class="empty-state">you should do something</div>
           {:else}
             {#each todoTasks as task (task.id)}
               <div class="task-item" class:active={task.status === 'doing'}>
@@ -445,7 +457,6 @@ const payload = { days_offset: currentDayOffset };
               </div>
             {/each}
           {/if}
-        <button on:click={handleNext}>next</button>
         </div>
       </div>
 
@@ -499,6 +510,7 @@ const payload = { days_offset: currentDayOffset };
       <div class="prompt-symbol">$</div>
       <input
         type="text"
+        id="command-line"
         bind:value={commandInput}
         placeholder="type a command or /? for help"
         on:keydown={handleKeydown}

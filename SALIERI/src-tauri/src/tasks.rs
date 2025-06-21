@@ -233,7 +233,9 @@ pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, Str
     }
     let mut store_guard = TASK_STORE.lock().await; 
     let bucket = bucket_mut(&mut *store_guard, &day); 
-
+    if bucket.todo.values().len()  == 5 {
+        return Err("No more than five tasks per day.".into())
+    }
     if bucket.todo.values().any(|t| t.title == title) || bucket.done.values().any(|t| t.title == title) {
         return Err("duplicate title".into());
     }
@@ -250,6 +252,8 @@ pub async fn command_todo(parts: &[&str], _app: AppHandle) -> Result<String, Str
         .map_err(|e| format!("Failed to save store: {}", e))?;
 
     Ok("added".into())
+
+
 }
 
 // ─── /doing
