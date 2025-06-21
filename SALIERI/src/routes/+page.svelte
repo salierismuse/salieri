@@ -176,13 +176,13 @@ const payload = { days_offset: currentDayOffset };
 
 
       if (cmd.startsWith('/write')) {
-      const parts = cmd.split(' ');
-      currFile = parts.slice(1).join(' ').trim();
-      tiptapBool = true;  
-      await tick();
-      toggleWriter(commandOutput as string);
+        const parts = cmd.split(' ');
+        currFile = parts.slice(1).join(' ').trim();
+        tiptapBool = true;  
+        await tick();
+        toggleWriter(commandOutput as string);
 
-      return;
+        return;
     }
 
     const dayToLoad = $currentLogicalDay || new Date().toLocaleDateString('en-CA');
@@ -240,7 +240,7 @@ const payload = { days_offset: currentDayOffset };
       done = false;
       currentDayOffset = 0;
     }
-    if (cmd.startsWith('/nextDay')) {
+    if (cmd.startsWith('/nextDay') || cmd.startsWith('/nd')) {
       handleNext();
     }
     if (cmd.startsWith('/prevDay'))
@@ -464,23 +464,23 @@ const payload = { days_offset: currentDayOffset };
       {/if}
     </section>
 
-  
-    {#if tiptapBool}
-      <div bind:this={element}>
-      </div>
-    {/if}
-
     <!-- Editor Panel -->
-    {#if $showEditor}
+   <!-- {#if $showEditor} -->
       <section class="editor-panel">
         <div class="editor-header">
-          <span>code</span>
-         <!---- <button class="close-btn" on:click={toggleEditor}>×</button> -->
+          <span>what will you write?</span>
         </div>
-        <div class="editor-container" bind:this={editorDiv}></div>
-      </section>
-    {/if}
-  </div>
+      {#if tiptapBool}
+
+        <div class ="editor-container" bind:this={element}>
+          
+        </div>
+      {:else}
+          <div class="editor-container" bind:this={editorDiv}></div>
+      {/if}
+    </section>
+    <!-- {/if}-->
+    </div>
 
   <!-- Command Line -->
   <footer class="command-line">
@@ -775,8 +775,12 @@ const payload = { days_offset: currentDayOffset };
   .editor-panel {
     background: var(--bg-primary);
     border-left: 1px solid var(--border);
+    height: 420px;
     display: flex;
     flex-direction: column;
+    overflow: hidden;
+    scrollbar-color: black;
+    min-height:100%;
   }
 
   .editor-header {
@@ -891,6 +895,13 @@ const payload = { days_offset: currentDayOffset };
     color: var(--accent-dim);
     font-size: 0.9rem;
   }
+
+  .scroller {
+  width: 300px;
+  height: 100px;
+  overflow-y: scroll;
+  scrollbar-color: #007 #bada55;
+}
 
   @media (max-width: 1200px) {
     .workspace {

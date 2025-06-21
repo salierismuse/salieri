@@ -23,10 +23,27 @@ fn expand_tilde(path: &str) -> Result<PathBuf, String>{
 
 fn process_file(user_path: String) -> Result<String, String>
 {
-    let full_path = expand_tilde(&user_path)?;
-
+    let full_path;
+    let full_string;
+    if (user_path.chars().next().unwrap() != '~') { 
+        if (user_path.len() > 0)
+        {
+            full_string = ["~/", "salieri_files/", &user_path].join("");
+            full_path = expand_tilde(&full_string)?;
+        }
+        else {
+            return Err(format!("no good!"));
+        }
+    }
+    else {
+        full_path = expand_tilde(&user_path)?;
+    }
+    
     if !full_path.exists() {
-        return Err(format!("file not found: {}", full_path.display()).into());
+        let path = std::path::Path::new(&full_path);
+        let prefix = path.parent().unwrap();
+        std::fs::create_dir_all(prefix).unwrap();
+        std::fs::write(&full_path, "").map_err(|e| e.to_string())?;
     }
     
     let contents = std::fs::read_to_string(&full_path).map_err(|e| e.to_string())?;
@@ -41,8 +58,22 @@ pub async fn command_code(path: &[&str], _app: AppHandle) -> Result<String, Stri
 
 #[tauri::command]
 pub async fn save_file(user_path: String, information: String) -> Result<String, String> {
-    let actual_path = expand_tilde(&user_path)?;
-    
+    let actual_path;
+    let full_string;
+    if (user_path.chars().next().unwrap() != '~') { 
+        if (user_path.len() > 0)
+        {
+            full_string = ["~/", "salieri_files/", &user_path].join("");
+            actual_path = expand_tilde(&full_string)?;
+        }
+        else {
+            return Err(format!("no good!"));
+        }
+    }
+    else {
+        actual_path = expand_tilde(&user_path)?;
+    }
+
     // create parent directories if they don't exist
     if let Some(parent) = actual_path.parent() {
         std::fs::create_dir_all(parent)
