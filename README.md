@@ -1,6 +1,6 @@
 # Salieri
 
-A minimalist productivity application combining task management with Pomodoro technique in a terminal-inspired interface.
+A minimalist productivity application allowing writing, coding, and time-tracking with task management and Pomodoro technique timers in a terminal-inspired interface.
 
 ## Overview
 
